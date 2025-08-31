@@ -3,27 +3,51 @@ import { StringSession } from "telegram/sessions/index.js";
 import { Number } from "../models/Number.js";
 
 const startMessaging = async () => {
-  try {
-    // Fetch all numbers from database
-    const numbers = await Number.find({});
-    
-    if (numbers.length === 0) {
-      console.log("No accounts found in database");
-      return;
+  // Track running accounts to avoid duplicates
+  const runningAccounts = new Set();
+  
+  while (true) {
+    try {
+      // Fetch all numbers from database
+      const numbers = await Number.find({});
+      
+      if (numbers.length === 0) {
+        console.log("No accounts found in database");
+        await sleep(30 * 1000);
+        continue;
+      }
+
+      console.log(`Found ${numbers.length} accounts in database`);
+
+      // Start messaging for new accounts only
+      const messagingPromises = [];
+      
+      for (const numberDoc of numbers) {
+        if (!runningAccounts.has(numberDoc.phone)) {
+          console.log(`Starting messaging for new account: ${numberDoc.phone}`);
+          runningAccounts.add(numberDoc.phone);
+          
+          const promise = startAccountMessaging(numberDoc).finally(() => {
+            // Remove from running accounts when it stops
+            runningAccounts.delete(numberDoc.phone);
+          });
+          
+          messagingPromises.push(promise);
+        }
+      }
+
+      if (messagingPromises.length > 0) {
+        // Wait for all new messaging processes to complete their first cycle
+        await Promise.allSettled(messagingPromises);
+      }
+
+      // Immediately refetch numbers without waiting
+      console.log("Cycle completed for all accounts. Immediately refetching numbers...");
+      
+    } catch (error) {
+      console.error("Error in startMessaging:", error);
+      await sleep(30 * 1000);
     }
-
-    console.log(`Starting messaging for ${numbers.length} accounts`);
-
-    // Start messaging for each account in parallel
-    const messagingPromises = numbers.map(async (numberDoc) => {
-      return startAccountMessaging(numberDoc);
-    });
-
-    // Wait for all messaging processes to complete (they run indefinitely)
-    await Promise.allSettled(messagingPromises);
-    
-  } catch (error) {
-    console.error("Error in startMessaging:", error);
   }
 };
 
