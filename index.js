@@ -37,30 +37,31 @@ bot.start(async (ctx) => {
     name = name ? name : ctx.from.last_name;
     name = name ? name : "User";
 
-    await ctx.reply(`Welcome, ${name}👋\n
-To login accounts, send me this command 👉 /login
-
-
-To set account message, send me this command 👉 /set_message {username}
-
-For example, to set message for @shubh, send me👉 /set_message @shubh
-`);
-
-    await ctx.reply(`Namaste, ${name}👋\n
-Account login karne ke liye, ye command bhejo 👉 /login
-
-
-Account message set karne ke liye, ye command bhejo 👉 /set_message {username}
-
-Jaise @shubh ke liye message set karna hai to bhejo👉 /set_message @shubh
-`);
+    await ctx.reply(
+      `Welcome, ${name}👋\n
+Click any of the buttons below to use me👇`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "See all accounts in the bot",
+                callback_data: "accounts",
+              },
+            ],
+            [{ text: "Login an account in bot", callback_data: "login" }],
+          ],
+        },
+      }
+    );
   } catch (error) {
     handleError(error, ctx);
   }
 });
 
-bot.command("login", async (ctx) => {
+bot.action("login", async (ctx) => {
   try {
+    await ctx.deleteMessage();
     global.takingNumber = true;
 
     await ctx.reply(
@@ -75,8 +76,9 @@ bot.command("login", async (ctx) => {
   }
 });
 
-bot.command("accounts", async (ctx) => {
+bot.action("accounts", async (ctx) => {
   try {
+    await ctx.deleteMessage();
     const allAcc = await Number.find().select("username phone");
     if (allAcc.length == 0) {
       await ctx.reply(
@@ -87,23 +89,23 @@ bot.command("accounts", async (ctx) => {
       );
     }
 
-    let accText = ``
-    allAcc.map((e)=>accText+=`${e.username}\n`)
+    let accText = ``;
+    allAcc.map((e) => (accText += `${e.username}\n`));
 
     const englishReply = `
 The following accounts are in the bot and sending messages to all their groups👇
 
 ${accText}
 
-To login more accounts, send 👉 /login`
-await ctx.reply(englishReply)
+To login more accounts, send 👉 /login`;
+    await ctx.reply(englishReply);
     const hindiReply = `
 Nimnalikhit accounts bot mein hain aur apne sare groups mein messages bhej rahe hain👇
 
 ${accText}
 
-Aur accounts login karne ke liye bhejein 👉 /login`
-await ctx.reply(hindiReply)
+Aur accounts login karne ke liye bhejein 👉 /login`;
+    await ctx.reply(hindiReply);
   } catch (error) {
     handleError(error);
   }
@@ -402,12 +404,7 @@ bot.on("text", async (ctx) => {
 
 bot.telegram.setMyCommands([
   { command: "/start", description: "Start Manya bot" },
-  {
-    command: "/login",
-    description: "Login a telegram account for group messaging",
-  },
   { command: "/set_message", description: "Set message for an account" },
-  {command:"/accounts", description:"See logged in accounts in the bot"}
 ]);
 
 // Helper function to send code with retry logic and DC migration handling
