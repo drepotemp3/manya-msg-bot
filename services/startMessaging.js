@@ -8,7 +8,7 @@ const startMessaging = async () => {
   
   while (true) {
     try {
-      // Fetch all numbers from database
+      // Fetch all numbers from database, and if none are found, re-fetch every 30s
       const numbers = await Number.find({});
       
       if (numbers.length === 0) {

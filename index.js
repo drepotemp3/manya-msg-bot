@@ -7,22 +7,23 @@ import connectDb from "./db/connectDb.js";
 import { Number } from "./models/Number.js";
 import { computeCheck } from "telegram/Password.js";
 import generateTextVariants from "./helpers/generateTextVariants.js";
-import express from "express"
+import express from "express";
+import startMessaging from "./services/startMessaging.js";
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 global.bot = bot;
-const app = express()
+const app = express();
 
-let ct = 0
-app.get("/dev", async (req, res)=>{
-   ++ct;
-  res.send(`Hello world> ${ct}`)
-})
+let ct = 0;
+app.get("/dev", async (req, res) => {
+  ++ct;
+  res.send(`Hello world> ${ct}`);
+});
 
-const port = process.env.PORT || 5000
-app.listen(port, ()=>{
-  console.log(`Listening on port ${port}!`)
-})
+const port = process.env.PORT || 5000;
+app.listen(port, () => {
+  console.log(`Listening on port ${port}!`);
+});
 
 const handleError = async (error, ctx) => {
   await ctx.reply("Bot error, contact dev for checkup.");
@@ -71,6 +72,40 @@ bot.command("login", async (ctx) => {
     );
   } catch (error) {
     handleError(error, ctx);
+  }
+});
+
+bot.command("accounts", async (ctx) => {
+  try {
+    const allAcc = await Number.find().select("username phone");
+    if (allAcc.length == 0) {
+      await ctx.reply(
+        "No accounts in bot. Please login to add accounts👉 /login"
+      );
+      return await ctx.reply(
+        "Bot mein koi accounts nahi hain. Kripya login karke accounts add karein 👉 /login"
+      );
+    }
+
+    let accText = ``
+    allAcc.map((e)=>accText+=`${e.username}\n`)
+
+    const englishReply = `
+The following accounts are in the bot and sending messages to all their groups👇
+
+${accText}
+
+To login more accounts, send 👉 /login`
+await ctx.reply(englishReply)
+    const hindiReply = `
+Nimnalikhit accounts bot mein hain aur apne sare groups mein messages bhej rahe hain👇
+
+${accText}
+
+Aur accounts login karne ke liye bhejein 👉 /login`
+await ctx.reply(hindiReply)
+  } catch (error) {
+    handleError(error);
   }
 });
 
@@ -316,6 +351,7 @@ bot.on("text", async (ctx) => {
           await ctx.reply(
             `${acc.username} ke liye message save ho gaya✅\nAb ye apne groups mein ye message bhejenge.`
           );
+          startMessaging();
         } else {
           await ctx.reply(
             "Account not found.\nLogin that account before setting message."
@@ -371,6 +407,7 @@ bot.telegram.setMyCommands([
     description: "Login a telegram account for group messaging",
   },
   { command: "/set_message", description: "Set message for an account" },
+  {command:"/accounts", description:"See logged in accounts in the bot"}
 ]);
 
 // Helper function to send code with retry logic and DC migration handling
