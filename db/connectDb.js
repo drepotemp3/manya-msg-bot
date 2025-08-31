@@ -11,7 +11,6 @@ function connectDb(retryCount = 0) {
 
   console.log("🟡 Attempting to connect to MongoDB...");
 
-  console.log(process.env.MONGODB_URI)
   mongoose
     .connect(process.env.MONGODB_URI, {
       dbName: "mania-msg-bot",
