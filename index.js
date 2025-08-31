@@ -332,6 +332,8 @@ bot.on("text", async (ctx) => {
           `Error❌\n${global.phoneToLogin} ka login complete nahi ho saka\nWajah: ${error.message}`
         );
 
+        global.takingCode = null;
+        
         // Clean up on error
         await cleanupClient();
         resetGlobalState();
@@ -539,7 +541,7 @@ async function handleSuccessfulLogin(result, ctx, password) {
 
   await ctx.reply(`Send the message for @${username}`);
   await ctx.reply(`@${username} ke liye message bhejo`);
-
+  global.takingCode = null;
   global.takingMessageFor = "@" + username;
   resetGlobalState();
   await cleanupClient();
