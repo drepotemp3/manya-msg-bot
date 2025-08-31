@@ -16,7 +16,7 @@ const app = express()
 let ct = 0
 app.get("/dev", async (req, res)=>{
    ++ct;
-  res.send("Hello world> ",+ct)
+  res.send(`Hello world> ${ct}`)
 })
 
 const port = process.env.PORT || 5000
