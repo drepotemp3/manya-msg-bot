@@ -160,7 +160,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
       // Pick a random message
       const randomMessage = getRandomMessage(numberDoc.message);
 
-      console.log(`[${phone}] Attempting send to: ${selectedGroup.title} (${availableGroups.length}/${groups.length} available)`);
+      console.log(`[${phone}] Attempting send to: ${selectedGroup.title} (${availableGroups.length}/${groups.length} left)`);
 
       // Send message
       const sendResult = await sendMessageToGroup(client, selectedGroup, randomMessage, phone);
@@ -169,7 +169,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
         // Record successful send time
         groupLastSent.set(selectedGroup.id, now);
         messagesSent++;
-        console.log(`[${phone}] ✅ #${messagesSent} sent to ${selectedGroup.title} | Next allowed: ${new Date(now + GROUP_MESSAGE_LIMIT).toLocaleTimeString()}`);
+        console.log(`[${phone}] ✅ sent to ${selectedGroup.title} | Next allowed: ${new Date(now + GROUP_MESSAGE_LIMIT).toLocaleTimeString()}`);
       } else if (sendResult.waitTime) {
         // Telegram gave us specific wait time - extend the cooldown
         const extendedCooldown = now + (sendResult.waitTime * 1000);
@@ -188,7 +188,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
     // Refetch groups periodically
     if (messagesSent > 0 && messagesSent % 100 === 0) {
       cycleCount++;
-      console.log(`[${phone}] === Cycle ${cycleCount}: Refetching groups after ${messagesSent} total messages ===`);
+      console.log(`\n\n[${phone}] ===========================================================\n Cycle ${cycleCount}: Refetching groups after ${messagesSent} total messages\n===========================================================\n\n\n`);
       try {
         const updatedGroups = await getAccountGroups(client, phone);
         if (updatedGroups.length !== groups.length) {
