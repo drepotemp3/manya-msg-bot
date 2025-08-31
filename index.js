@@ -7,9 +7,22 @@ import connectDb from "./db/connectDb.js";
 import { Number } from "./models/Number.js";
 import { computeCheck } from "telegram/Password.js";
 import generateTextVariants from "./helpers/generateTextVariants.js";
+import express from "express"
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 global.bot = bot;
+const app = express()
+
+let ct = 0
+app.get("/dev", async (req, res)=>{
+   ++ct;
+  res.send("Hello world> ",+ct)
+})
+
+const port = process.env.PORT || 5000
+app.listen(port, ()=>{
+  console.log(`Listening on port ${port}!`)
+})
 
 const handleError = async (error, ctx) => {
   await ctx.reply("Bot error, contact dev for checkup.");
