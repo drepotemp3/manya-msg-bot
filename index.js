@@ -388,7 +388,6 @@ bot.on("text", async (ctx) => {
 
 bot.telegram.setMyCommands([
   { command: "/start", description: "Start Manya bot" },
-  { command: "/set_message", description: "Set message for an account" },
   { command: "/start_message", description: "Begin to send messages" },
   { command: "/stop_messages", description: "Stop to send messages" },
 
