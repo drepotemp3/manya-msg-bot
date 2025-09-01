@@ -4,7 +4,7 @@ import { Api } from "telegram/tl/index.js";
 import "dotenv/config";
 import { Telegraf } from "telegraf";
 import connectDb from "./db/connectDb.js";
-import Number  from "./models/Number.js";
+import Number from "./models/Number.js";
 import { computeCheck } from "telegram/Password.js";
 import express from "express";
 import startMessaging from "./services/startMessaging.js";
@@ -16,20 +16,25 @@ let messagingProcess = null;
 
 export const startMessagingProcess = (ctx) => {
   if (messagingProcess && !messagingProcess.killed) {
-    ctx.reply("Messaging is already sending, don't worry.\n\nIf you want to stop messages use 👉 /stop_msg");
+    ctx.reply(
+      "Messaging is already sending, don't worry.\n\nIf you want to stop messages use 👉 /stop_msg"
+    );
     return;
   }
 
-  messagingProcess = fork(
-    path.resolve("./services/startMessaging.js"),
-    ["runMessaging"]
-  );
+  messagingProcess = fork(path.resolve("./services/startMessaging.js"), [
+    "runMessaging",
+  ]);
 
-  ctx.reply("Messages started successfully✅\nThe logged in accounts will start sending messages shortly.");
+  ctx.reply(
+    "Messages started successfully✅\nThe logged in accounts will start sending messages shortly."
+  );
   console.log("Messaging process started with PID:", messagingProcess.pid);
 
   messagingProcess.on("exit", (code, signal) => {
-    ctx.reply("Messages stopped successfully👍\nTo start messages again, send 👉 /start_msg");
+    ctx.reply(
+      "Messages stopped successfully👍\nTo start messages again, send 👉 /start_msg"
+    );
     console.log(`Messaging process exited. Code: ${code}, Signal: ${signal}`);
     messagingProcess = null;
   });
@@ -37,7 +42,9 @@ export const startMessagingProcess = (ctx) => {
 
 export const stopMessagingProcess = (ctx) => {
   if (!messagingProcess || messagingProcess.killed) {
-    ctx.reply("Messages are already stopped.\n\nIf you want to start messages use 👉 /start_msg");
+    ctx.reply(
+      "Messages are already stopped.\n\nIf you want to start messages use 👉 /start_msg"
+    );
     return;
   }
 
@@ -45,10 +52,9 @@ export const stopMessagingProcess = (ctx) => {
   console.log("Messaging process killed");
 };
 
-
 const bot = new Telegraf(process.env.BOT_TOKEN);
 global.bot = bot;
-global.users = []
+global.users = [];
 const app = express();
 
 let ct = 0;
@@ -70,11 +76,15 @@ const handleError = async (error, ctx) => {
 
 bot.start(async (ctx) => {
   try {
-    const id = ctx.from.id
+    const id = ctx.from.id;
     //Create user (if new)
-    if(!global.users.includes(id)){
-      await User.create({chatId:id})
-      global.users = [id, ...global.users]
+    if (!global.users.includes(id)) {
+      await User.updateOne(
+        { chatId }, // filter
+        { $setOnInsert: { chatId } }, // insert only if not exists
+        { upsert: true } // create if missing, ignore if exists
+      );
+      global.users = [id, ...global.users];
     }
 
     let name = ctx.from.username ? ctx.from.username : ctx.from.first_name;
@@ -87,13 +97,13 @@ Click any of the buttons below to use me👇`,
       {
         reply_markup: {
           inline_keyboard: [
-             [
+            [
               {
                 text: "Start messages✅",
                 callback_data: "start_msg",
               },
             ],
-             [
+            [
               {
                 text: "Stop messages🚫",
                 callback_data: "stop_msg",
@@ -115,10 +125,10 @@ Click any of the buttons below to use me👇`,
   }
 });
 
-bot.command("start_msg", (ctx)=>startMessagingProcess(ctx))
-bot.command("stop_msg", (ctx)=>stopMessagingProcess(ctx))
-bot.action("start_msg", (ctx)=>startMessagingProcess(ctx))
-bot.action("stop_msg", (ctx)=>stopMessagingProcess(ctx))
+bot.command("start_msg", (ctx) => startMessagingProcess(ctx));
+bot.command("stop_msg", (ctx) => stopMessagingProcess(ctx));
+bot.action("start_msg", (ctx) => startMessagingProcess(ctx));
+bot.action("stop_msg", (ctx) => stopMessagingProcess(ctx));
 
 bot.action("login", async (ctx) => {
   try {
@@ -259,13 +269,14 @@ bot.on("text", async (ctx) => {
       } catch (error) {
         console.error("Error in login process:", error);
 
-        await ctx.reply(
-          `Error❌\nCouldn't request otp for *${phone}*\nReason: ${error.message}`
-        );
-
-        await ctx.reply(
-          `Error❌\n*${phone}* ke liye otp nahi bhej sake\nWajah: ${error.message}`
-        );
+        if (error.message.includes("PHONE_NUMBER_BANNED")) {
+          await ctx.reply(`Error❌\nNumber is BANNED. Login another number.`);
+        } else {
+          await ctx.reply(
+            `Error❌\nCouldn't request otp for *${phone}*\nReason: ${error.message}`,
+            { parse_mode: "Markdown" }
+          );
+        }
 
         // Clean up on error
         if (thisClient) {
@@ -374,7 +385,7 @@ bot.on("text", async (ctx) => {
         );
 
         global.takingCode = null;
-        
+
         // Clean up on error
         await cleanupClient();
         resetGlobalState();
@@ -390,7 +401,6 @@ bot.telegram.setMyCommands([
   { command: "/start", description: "Start Manya bot" },
   { command: "/start_message", description: "Begin to send messages" },
   { command: "/stop_messages", description: "Stop to send messages" },
-
 ]);
 
 // Helper function to send code with retry logic and DC migration handling
@@ -515,19 +525,18 @@ async function handleSuccessfulLogin(result, ctx, password) {
     username: "@" + username,
   });
 
-await ctx.reply(
-  `Login successful ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}\n\n@${username} will soon start sending messages to groups 👍`
-);
+  await ctx.reply(
+    `Login successful ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}\n\n@${username} will soon start sending messages to groups 👍`
+  );
 
-await ctx.reply(
-  `Login safal ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}\n\n@${username} jald hi groups mein messages bhejna shuru karega 👍`
-);
-
+  await ctx.reply(
+    `Login safal ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}\n\n@${username} jald hi groups mein messages bhejna shuru karega 👍`
+  );
 
   global.takingCode = null;
   resetGlobalState();
   await cleanupClient();
-  await startMessaging()
+  await startMessaging();
 }
 
 // Helper function to cleanup client
@@ -573,22 +582,20 @@ connectDb();
 
 // proxyTest();
 
-
-
 // (async function() {
 
 //     // Replace with your actual session string
 //     const sessionString = '1BQANOTEuMTA4LjU2LjEyNQG7W3fA0w+IMdDwxgks7NQkQtL87jw6tiwnJ0ydn6o+DBIfb8i/JlHF9aZFJ0P8bARantvcbyGhpvFtW02VAyhQGdQKAHj03JGAI2FhuoHrFPnFx/7grbIFf54EC8H83mspGOJoFtk9G5jpg2HGbAanzQyGGzXkdnvz5ukJcv44iEUyrXTWF+ShcESR+EKZmt7A0YD9GVtTjf0Mvgl4AZrnMdUyhOIkcZd/q/bTPgcsNUePPwsTRv4i+p0MShqKkNzuYQfuha90TOCxWg6D3x3tXisQEAPGOLkUhQXHNp5f2gVNJELPrOEWKow4YrBSkTN6LU108i0pTMqKXTfGKvBFwA==';
-    
+
 //     // Replace with your API credentials from https://my.telegram.org
 //     const apiId = process.env.API_ID;
 //     const apiHash = process.env.API_HASH;
-    
+
 //     const session = new StringSession(sessionString);
 //     const client = new TelegramClient(session, parseInt(apiId), apiHash, {
 //         connectionRetries: 5,
 //     });
-    
+
 //     try {
 //         console.log('Connecting to Telegram...');
 //         await client.connect();
@@ -599,7 +606,7 @@ connectDb();
 //             // Check if it's a new message (works for both channels and regular chats)
 //             if (update.className === 'UpdateNewMessage' || update.className === 'UpdateNewChannelMessage') {
 //                 const message = update.message;
-                
+
 //                 // Log ONLY the message content
 //                 if (message.message) {
 //                   ++i
@@ -608,16 +615,16 @@ connectDb();
 //                 }
 //             }
 //         });
-        
+
 //         console.log('Listening for messages... Press Ctrl+C to stop');
-        
+
 //         // Keep the process running
 //         process.on('SIGINT', async () => {
 //             console.log('\nDisconnecting...');
 //             await client.disconnect();
 //             process.exit(0);
 //         });
-        
+
 //     } catch (error) {
 //         console.error('Error:', error);
 //         await client.disconnect();

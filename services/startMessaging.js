@@ -2,11 +2,27 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import Number from "../models/Number.js";
 import adMessages from "../utils/adMessages.js";
-
 import "dotenv/config";
 import handleArrErr from "../helpers/handleAccErr.js";
-
 import { mongoose } from "mongoose";
+import User from "../models/User.js";
+
+const loadUsers = async () => {
+try {
+    const users = await User.find();
+  if (users.length > 0) {
+    let allUsers = [];
+    for (const u of users) {
+      allUsers.push(u.chatId);
+    }
+
+    global.users = allUsers;
+  }
+  global.messaging = true;
+} catch (error) {
+  console.log("Error loading users\n",error)
+}
+};
 
 // Your proxy config from IPRoyal
 const proxyHost = process.env.proxyHost || "geo.iproyal.com";
@@ -202,6 +218,7 @@ const startMessaging = async () => {
   await mongoose.connect(process.env.MONGODB_URI, {
     dbName: "mania-msg-bot",
   });
+  await loadUsers()
 
   while (true) {
     try {

@@ -1,4 +1,10 @@
 import Number from "../models/Number.js";
+import { Telegraf } from "telegraf";
+import "dotenv/config"
+
+const bot = new Telegraf(process.env.BOT_TOKEN);
+global.bot = bot
+
 const deleteAcc = async (justPhone, numberDoc) => {
   //Delete acc
   try {
@@ -53,6 +59,7 @@ Abhi ke liye yeh groups mein messages nahi bhejega jab tak aap dobara login nahi
     console.error(`❌ Session revoked or logged out for ${numberDoc.phone}`);
     // DB: delete or mark dead
     // return null;
+    console.log(global.users)
     for (const u of global.users) {
       global.bot.telegram.sendMessage(u, accountAlert);
     }

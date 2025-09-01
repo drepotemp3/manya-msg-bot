@@ -7,7 +7,8 @@ import startMessaging from "../services/startMessaging.js";
 let isConnecting = false;
 
 const loadUsers = async () => {
-  const users = await User.find();
+try {
+    const users = await User.find();
   if (users.length > 0) {
     let allUsers = [];
     for (const u of users) {
@@ -16,8 +17,12 @@ const loadUsers = async () => {
 
     global.users = allUsers;
     // startMessaging()
+    console.log(global.users)
   }
   global.messaging = true;
+} catch (error) {
+  console.log("Error loading users\n",error)
+}
 };
 
 function connectDb(retryCount = 0) {
