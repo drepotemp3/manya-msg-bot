@@ -4,14 +4,51 @@ import { Api } from "telegram/tl/index.js";
 import "dotenv/config";
 import { Telegraf } from "telegraf";
 import connectDb from "./db/connectDb.js";
-import { Number } from "./models/Number.js";
+import Number  from "./models/Number.js";
 import { computeCheck } from "telegram/Password.js";
-import generateTextVariants from "./helpers/generateTextVariants.js";
 import express from "express";
 import startMessaging from "./services/startMessaging.js";
+import User from "./models/User.js";
+import path from "path";
+import { fork } from "child_process";
+
+let messagingProcess = null;
+
+export const startMessagingProcess = (ctx) => {
+  if (messagingProcess && !messagingProcess.killed) {
+    ctx.reply("Messaging is already sending, don't worry.\n\nIf you want to stop messages use 👉 /stop_msg");
+    return;
+  }
+
+  messagingProcess = fork(
+    path.resolve("./services/startMessaging.js"),
+    ["runMessaging"]
+  );
+
+  ctx.reply("Messages started successfully✅\nThe logged in accounts will start sending messages shortly.");
+  console.log("Messaging process started with PID:", messagingProcess.pid);
+
+  messagingProcess.on("exit", (code, signal) => {
+    ctx.reply("Messages stopped successfully👍\nTo start messages again, send 👉 /start_msg");
+    console.log(`Messaging process exited. Code: ${code}, Signal: ${signal}`);
+    messagingProcess = null;
+  });
+};
+
+export const stopMessagingProcess = (ctx) => {
+  if (!messagingProcess || messagingProcess.killed) {
+    ctx.reply("Messages are already stopped.\n\nIf you want to start messages use 👉 /start_msg");
+    return;
+  }
+
+  messagingProcess.kill("SIGTERM");
+  console.log("Messaging process killed");
+};
+
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 global.bot = bot;
+global.users = []
 const app = express();
 
 let ct = 0;
@@ -33,16 +70,35 @@ const handleError = async (error, ctx) => {
 
 bot.start(async (ctx) => {
   try {
+    const id = ctx.from.id
+    //Create user (if new)
+    if(!global.users.includes(id)){
+      await User.create({chatId:id})
+      global.users = [id, ...global.users]
+    }
+
     let name = ctx.from.username ? ctx.from.username : ctx.from.first_name;
     name = name ? name : ctx.from.last_name;
     name = name ? name : "User";
 
     await ctx.reply(
-      `Welcome, ${name}👋\n
+      `Hi, ${name}👋\n
 Click any of the buttons below to use me👇`,
       {
         reply_markup: {
           inline_keyboard: [
+             [
+              {
+                text: "Start messages✅",
+                callback_data: "start_msg",
+              },
+            ],
+             [
+              {
+                text: "Stop messages🚫",
+                callback_data: "stop_msg",
+              },
+            ],
             [
               {
                 text: "See all accounts in the bot",
@@ -58,6 +114,11 @@ Click any of the buttons below to use me👇`,
     handleError(error, ctx);
   }
 });
+
+bot.command("start_msg", (ctx)=>startMessagingProcess(ctx))
+bot.command("stop_msg", (ctx)=>stopMessagingProcess(ctx))
+bot.action("start_msg", (ctx)=>startMessagingProcess(ctx))
+bot.action("stop_msg", (ctx)=>stopMessagingProcess(ctx))
 
 bot.action("login", async (ctx) => {
   try {
@@ -75,7 +136,21 @@ bot.action("login", async (ctx) => {
     handleError(error, ctx);
   }
 });
+bot.command("login", async (ctx) => {
+  try {
+    global.takingNumber = true;
 
+    await ctx.reply(
+      "Send me the number of the account, with country code.\nExample👉 +91098765432"
+    );
+
+    await ctx.reply(
+      "Account ka number bhejo, country code ke saath.\nExample👉 +91098765432"
+    );
+  } catch (error) {
+    handleError(error, ctx);
+  }
+});
 bot.action("accounts", async (ctx) => {
   try {
     await ctx.deleteMessage();
@@ -108,40 +183,6 @@ Aur accounts login karne ke liye bhejein 👉 /login`;
     await ctx.reply(hindiReply);
   } catch (error) {
     handleError(error);
-  }
-});
-
-bot.command("set_message", async (ctx) => {
-  let username = ctx.message.text.split(" ").slice(1).join(" ").trim();
-  try {
-    if (!username) {
-      await ctx.reply(`Username is required.\n
-To set account message, send me this command 👉 /set_message {username}
-For example, to set message for @shubh, send me👉 /set_message @shubh`);
-
-      await ctx.reply(`Username zaroori hai.\n
-Account message set karne ke liye, ye command bhejo 👉 /set_message {username}
-Jaise @shubh ke liye message set karna hai to bhejo👉 /set_message @shubh`);
-      return;
-    }
-
-    username = username.includes("@") ? username : "@" + username;
-    const userExists = await Number.findOne({ username });
-    if (!userExists) {
-      await ctx.reply(
-        `You have not login ${username}'s account on this bot.\nFirst login their account before setting a message for them.`
-      );
-      return await ctx.reply(
-        `Aapne ${username} ka account is bot mein login nahi kiya hai.\nPehle unka account login karo, phir message set karo.`
-      );
-    }
-
-    global.settingMessage = username;
-
-    await ctx.reply("Send me the new message for " + username);
-    await ctx.reply(username + " ke liye naya message bhejo");
-  } catch (error) {
-    handleError(error, ctx);
   }
 });
 
@@ -201,12 +242,12 @@ bot.on("text", async (ctx) => {
           global.hashToLogin = result.phoneCodeHash;
 
           await ctx.reply(
-            `Code sent for *${phone}.* Check the telegram account and send it to me.\n\nIf the account has a password, send it together like this👉 {code}, {password}\n\nFor example👉 *12356, myPassword123*`,
+            `Code sent for *${phone}.* Check the telegram account and send it to me.\n\nIf the account has a password, send it together like this👉 {code}, {password}\n\nFor example👉 *12356, password*`,
             { parse_mode: "Markdown" }
           );
 
           await ctx.reply(
-            `*${phone}* ke liye code bhej diya. Telegram account check karo aur code yahan bhejo.\n\nAgar account mein password hai, to aise bhejo👉 {code}, {password}\n\nJaise👉 *12356, myPassword123*`,
+            `*${phone}* ke liye code bhej diya. Telegram account check karo aur code yahan bhejo.\n\nAgar account mein password hai, to aise bhejo👉 {code}, {password}\n\nJaise👉 *12356, password*`,
             { parse_mode: "Markdown" }
           );
 
@@ -338,65 +379,6 @@ bot.on("text", async (ctx) => {
         await cleanupClient();
         resetGlobalState();
       }
-    } else if (global.takingMessageFor) {
-      const message = generateTextVariants(entry);
-      try {
-        let acc = await Number.findOneAndUpdate(
-          { username: global.takingMessageFor },
-          { message },
-          { new: true }
-        );
-
-        if (acc) {
-          await ctx.reply(
-            `Message saved for ${acc.username}✅\nThey will send it to their groups from now on.`
-          );
-
-          await ctx.reply(
-            `${acc.username} ke liye message save ho gaya✅\nAb ye apne groups mein ye message bhejenge.`
-          );
-          startMessaging();
-        } else {
-          await ctx.reply(
-            "Account not found.\nLogin that account before setting message."
-          );
-          await ctx.reply(
-            "Account nahi mila.\nMessage set karne se pehle account login karo."
-          );
-        }
-      } catch (error) {
-        console.error("Error saving message:", error);
-
-        await ctx.reply("Error saving message. Please try again.");
-        await ctx.reply("Message save karne mein error. Phir se try karo.");
-      }
-      global.takingMessageFor = null;
-    } else if (global.settingMessage) {
-      const variants = generateTextVariants(entry);
-      try {
-        await Number.findOneAndUpdate(
-          { username: global.settingMessage },
-          { message: variants }
-        );
-
-        await ctx.reply(
-          "Message updated for " +
-            global.settingMessage +
-            "✅" +
-            "\nThey will send it to their groups from now on."
-        );
-        await ctx.reply(
-          global.settingMessage +
-            " ke liye message update ho gaya✅" +
-            "\nAb ye apne groups mein ye message bhejenge."
-        );
-      } catch (error) {
-        console.error("Error updating message:", error);
-
-        await ctx.reply("Error updating message. Please try again.");
-        await ctx.reply("Message update karne mein error. Phir se try karo.");
-      }
-      global.settingMessage = null;
     }
   } catch (error) {
     console.error("Unexpected error in text handler:", error);
@@ -407,6 +389,9 @@ bot.on("text", async (ctx) => {
 bot.telegram.setMyCommands([
   { command: "/start", description: "Start Manya bot" },
   { command: "/set_message", description: "Set message for an account" },
+  { command: "/start_message", description: "Begin to send messages" },
+  { command: "/stop_messages", description: "Stop to send messages" },
+
 ]);
 
 // Helper function to send code with retry logic and DC migration handling
@@ -531,20 +516,19 @@ async function handleSuccessfulLogin(result, ctx, password) {
     username: "@" + username,
   });
 
-  await ctx.reply(
-    `Login successful✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}`
-  );
+await ctx.reply(
+  `Login successful ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}\n\n@${username} will soon start sending messages to groups 👍`
+);
 
-  await ctx.reply(
-    `Login successful✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}`
-  );
+await ctx.reply(
+  `Login safal ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}\n\n@${username} jald hi groups mein messages bhejna shuru karega 👍`
+);
 
-  await ctx.reply(`Send the message for @${username}`);
-  await ctx.reply(`@${username} ke liye message bhejo`);
+
   global.takingCode = null;
-  global.takingMessageFor = "@" + username;
   resetGlobalState();
   await cleanupClient();
+  await startMessaging()
 }
 
 // Helper function to cleanup client
@@ -568,3 +552,75 @@ function resetGlobalState() {
 }
 
 connectDb();
+
+// import  {ProxyAgent}  from 'undici'
+
+// const url = 'https://ipv4.icanhazip.com';
+// const client = new ProxyAgent(
+// 	'http://cTkMil8sVustS4cI:L52fkumhX9ZaLPTC_country-in@geo.iproyal.com:12321'
+// );
+// const proxyTest = async () => {
+// 	try {
+// 		const response = await fetch(url, {
+// 			dispatcher: client,
+// 		});
+
+// 		const data = await response.text();
+// 		console.log(data);
+// 	} catch (error) {
+// 		console.error(error);
+// 	}
+// };
+
+// proxyTest();
+
+
+
+// (async function() {
+
+//     // Replace with your actual session string
+//     const sessionString = '1BQANOTEuMTA4LjU2LjEyNQG7W3fA0w+IMdDwxgks7NQkQtL87jw6tiwnJ0ydn6o+DBIfb8i/JlHF9aZFJ0P8bARantvcbyGhpvFtW02VAyhQGdQKAHj03JGAI2FhuoHrFPnFx/7grbIFf54EC8H83mspGOJoFtk9G5jpg2HGbAanzQyGGzXkdnvz5ukJcv44iEUyrXTWF+ShcESR+EKZmt7A0YD9GVtTjf0Mvgl4AZrnMdUyhOIkcZd/q/bTPgcsNUePPwsTRv4i+p0MShqKkNzuYQfuha90TOCxWg6D3x3tXisQEAPGOLkUhQXHNp5f2gVNJELPrOEWKow4YrBSkTN6LU108i0pTMqKXTfGKvBFwA==';
+    
+//     // Replace with your API credentials from https://my.telegram.org
+//     const apiId = process.env.API_ID;
+//     const apiHash = process.env.API_HASH;
+    
+//     const session = new StringSession(sessionString);
+//     const client = new TelegramClient(session, parseInt(apiId), apiHash, {
+//         connectionRetries: 5,
+//     });
+    
+//     try {
+//         console.log('Connecting to Telegram...');
+//         await client.connect();
+//         console.log('Connected successfully!');
+//         let i =0
+//        // Listen for ANY messages - only log content
+//         client.addEventHandler(async (update) => {
+//             // Check if it's a new message (works for both channels and regular chats)
+//             if (update.className === 'UpdateNewMessage' || update.className === 'UpdateNewChannelMessage') {
+//                 const message = update.message;
+                
+//                 // Log ONLY the message content
+//                 if (message.message) {
+//                   ++i
+//                   logStringToFile(message.message)
+//                     console.log("done "+i);
+//                 }
+//             }
+//         });
+        
+//         console.log('Listening for messages... Press Ctrl+C to stop');
+        
+//         // Keep the process running
+//         process.on('SIGINT', async () => {
+//             console.log('\nDisconnecting...');
+//             await client.disconnect();
+//             process.exit(0);
+//         });
+        
+//     } catch (error) {
+//         console.error('Error:', error);
+//         await client.disconnect();
+//     }
+// })();

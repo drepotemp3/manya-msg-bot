@@ -1,9 +1,24 @@
 import { mongoose } from "mongoose";
 import "dotenv/config";
-import startMessaging from "../services/startMessaging.js";
 import launchBot from "../helpers/launchBot.js";
+import User from "../models/User.js";
+import startMessaging from "../services/startMessaging.js";
 
 let isConnecting = false;
+
+const loadUsers = async () => {
+  const users = await User.find();
+  if (users.length > 0) {
+    let allUsers = [];
+    for (const u of users) {
+      allUsers.push(u.chatId);
+    }
+
+    global.users = allUsers;
+    // startMessaging()
+  }
+  global.messaging = true;
+};
 
 function connectDb(retryCount = 0) {
   if (isConnecting) return;
@@ -23,12 +38,10 @@ function connectDb(retryCount = 0) {
         launchBot(); // ✅ only launch bot once
         global.isBotLaunched = true;
       }
-
-      global.messaging = true
-      startMessaging()
+      loadUsers(); //Load all users into cache
     })
     .catch((err) => {
-      global.messaging = false
+      global.messaging = false;
       console.error(
         `❌ MongoDB connection error (attempt ${retryCount + 1}):`,
         err.message

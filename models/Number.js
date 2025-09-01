@@ -8,4 +8,5 @@ const numberSchema = Schema({
     message:[String],
 })
 
-export const Number = model("Number", numberSchema)
+const Number = model("Number", numberSchema)
+export default Number
