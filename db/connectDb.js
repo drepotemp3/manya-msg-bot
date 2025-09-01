@@ -2,7 +2,6 @@ import { mongoose } from "mongoose";
 import "dotenv/config";
 import launchBot from "../helpers/launchBot.js";
 import User from "../models/User.js";
-import startMessaging from "../services/startMessaging.js";
 
 let isConnecting = false;
 
@@ -16,8 +15,6 @@ try {
     }
 
     global.users = allUsers;
-    // startMessaging()
-    console.log(global.users)
   }
   global.messaging = true;
 } catch (error) {
