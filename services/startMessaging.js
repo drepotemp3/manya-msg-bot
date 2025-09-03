@@ -1,4 +1,4 @@
-import { TelegramClient } from "telegram";
+import { Api, TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import Number from "../models/Number.js";
 import adMessages from "../utils/adMessages.js";
@@ -546,16 +546,100 @@ const simulateHumanActivity = async (client, groups, phone) => {
         const me = await client.getMe();
         console.log(`[${phone}] 👤 Simulated profile activity`);
       },
+
+      // Simulate typing activity (very human-like behavior)
+      async () => {
+        const randomGroup = groups[Math.floor(Math.random() * groups.length)];
+        try {
+          // Start typing indicator
+          await client.invoke(new Api.messages.SetTyping({
+            peer: randomGroup.entity || randomGroup.id,
+            action: new Api.SendMessageTypingAction({})
+          }));
+          
+          // Keep typing for realistic duration (2-8 seconds)
+          const typingDuration = 2000 + Math.random() * 6000;
+          await sleep(typingDuration);
+          
+          // Stop typing by sending cancel action
+          await client.invoke(new Api.messages.SetTyping({
+            peer: randomGroup.entity || randomGroup.id,
+            action: new Api.SendMessageCancelAction({})
+          }));
+          
+          console.log(`[${phone}] ⌨️  Simulated typing for ${Math.round(typingDuration/1000)}s in: ${randomGroup.title}`);
+        } catch (typingError) {
+          // Fallback: just simulate thinking time without API calls
+          const thinkingTime = 1000 + Math.random() * 3000;
+          await sleep(thinkingTime);
+          console.log(`[${phone}] 💭 Simulated thinking time (${Math.round(thinkingTime/1000)}s) - typing API failed`);
+        }
+      },
+
+      // Simulate checking message history (scroll behavior)
+      async () => {
+        const randomGroup = groups[Math.floor(Math.random() * groups.length)];
+        // Get older messages to simulate scrolling back
+        const offsetId = Math.floor(Math.random() * 100) + 50; // Random offset
+        await client.getMessages(randomGroup.id, {
+          limit: Math.floor(Math.random() * 3) + 1,
+          offsetId: offsetId
+        });
+        console.log(`[${phone}] 📜 Simulated scrolling through history in: ${randomGroup.title}`);
+      },
+
+      // Simulate brief online status update
+      async () => {
+        try {
+          await client.invoke(new Api.account.UpdateStatus({
+            offline: false
+          }));
+          console.log(`[${phone}] 🟢 Updated online status`);
+        } catch (statusError) {
+          console.log(`[${phone}] 🟡 Online status update failed (non-critical)`);
+        }
+      },
+
+      // Simulate checking a random chat (switching between chats)
+      async () => {
+        if (groups.length > 1) {
+          const randomGroup1 = groups[Math.floor(Math.random() * groups.length)];
+          const randomGroup2 = groups[Math.floor(Math.random() * groups.length)];
+          
+          // Check first chat
+          await client.getMessages(randomGroup1.id, { limit: 1 });
+          await sleep(500 + Math.random() * 1500); // Brief pause
+          
+          // Switch to second chat
+          await client.getMessages(randomGroup2.id, { limit: 1 });
+          
+          console.log(`[${phone}] 🔄 Simulated switching between chats: ${randomGroup1.title} → ${randomGroup2.title}`);
+        }
+      }
     ];
 
-    // Pick random activity
-    const randomActivity =
-      activities[Math.floor(Math.random() * activities.length)];
-    await randomActivity();
+    // Pick random activity with weighted probability (typing is more common)
+    let selectedActivity;
+    const random = Math.random();
+    
+    if (random < 0.3) {
+      // 30% chance of typing simulation (most human-like)
+      selectedActivity = activities[3]; // typing activity
+    } else if (random < 0.6) {
+      // 30% chance of reading messages
+      selectedActivity = activities[0]; // reading activity  
+    } else {
+      // 40% chance of other activities
+      const otherActivities = [activities[1], activities[2], activities[4], activities[5], activities[6]];
+      selectedActivity = otherActivities[Math.floor(Math.random() * otherActivities.length)];
+    }
+    
+    await selectedActivity();
+    
   } catch (error) {
     handleArrErr(error, phone, true);
     // Silently ignore simulation errors - they're not critical
-    console.log(`[${phone}] Activity simulation failed (non-critical)`);
+    console.log(`[${phone}] Activity simulation failed (non-critical): ${error.message}`);
   }
 };
 
