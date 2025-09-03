@@ -7,53 +7,12 @@ import connectDb from "./db/connectDb.js";
 import Number from "./models/Number.js";
 import { computeCheck } from "telegram/Password.js";
 import express from "express";
-import startMessaging from "./services/startMessaging.js";
+import startMessaging, { setupBotCommands, stopMessaging } from "./services/startMessaging.js";
 import User from "./models/User.js";
-import path from "path";
-import { fork } from "child_process";
-
-let messagingProcess = null;
-
-export const startMessagingProcess = (ctx) => {
-  if (messagingProcess && !messagingProcess.killed) {
-    ctx.reply(
-      "Messaging is already sending, don't worry.\n\nIf you want to stop messages use 👉 /stop_msg"
-    );
-    return;
-  }
-
-  messagingProcess = fork(path.resolve("./services/startMessaging.js"), [
-    "runMessaging",
-  ]);
-
-  ctx.reply(
-    "Messages started successfully✅\nThe logged in accounts will start sending messages shortly."
-  );
-  console.log("Messaging process started with PID:", messagingProcess.pid);
-
-  messagingProcess.on("exit", (code, signal) => {
-    ctx.reply(
-      "Messages stopped successfully👍\nTo start messages again, send 👉 /start_msg"
-    );
-    console.log(`Messaging process exited. Code: ${code}, Signal: ${signal}`);
-    messagingProcess = null;
-  });
-};
-
-export const stopMessagingProcess = (ctx) => {
-  if (!messagingProcess || messagingProcess.killed) {
-    ctx.reply(
-      "Messages are already stopped.\n\nIf you want to start messages use 👉 /start_msg"
-    );
-    return;
-  }
-
-  messagingProcess.kill("SIGTERM");
-  console.log("Messaging process killed");
-};
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 global.bot = bot;
+setupBotCommands(bot)
 global.users = [];
 const app = express();
 
@@ -76,15 +35,15 @@ const handleError = async (error, ctx) => {
 
 bot.start(async (ctx) => {
   try {
-    const id = ctx.from.id;
+    const chatId = ctx.from.id;
     //Create user (if new)
-    if (!global.users.includes(id)) {
+    if (!global.users.includes(chatId)) {
       await User.updateOne(
         { chatId }, // filter
         { $setOnInsert: { chatId } }, // insert only if not exists
         { upsert: true } // create if missing, ignore if exists
       );
-      global.users = [id, ...global.users];
+      global.users = [chatId, ...global.users];
     }
 
     let name = ctx.from.username ? ctx.from.username : ctx.from.first_name;
@@ -99,14 +58,20 @@ Click any of the buttons below to use me👇`,
           inline_keyboard: [
             [
               {
-                text: "Start messages✅",
-                callback_data: "start_msg",
+                text: "Start messages ✅",
+                callback_data: "startmsg",
               },
             ],
             [
               {
-                text: "Stop messages🚫",
-                callback_data: "stop_msg",
+                text: "Stop messages 🚫",
+                callback_data: "stopmsg",
+              },
+            ],
+              [
+              {
+                text: "Bot Status 🚇",
+                callback_data: "status",
               },
             ],
             [
@@ -124,11 +89,6 @@ Click any of the buttons below to use me👇`,
     handleError(error, ctx);
   }
 });
-
-bot.command("start_msg", (ctx) => startMessagingProcess(ctx));
-bot.command("stop_msg", (ctx) => stopMessagingProcess(ctx));
-bot.action("start_msg", (ctx) => startMessagingProcess(ctx));
-bot.action("stop_msg", (ctx) => stopMessagingProcess(ctx));
 
 bot.action("login", async (ctx) => {
   try {
@@ -526,16 +486,17 @@ async function handleSuccessfulLogin(result, ctx, password) {
   });
 
   await ctx.reply(
-    `Login successful ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}\n\n@${username} will soon start sending messages to groups 👍`
+    `Login successful ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}`
   );
 
   await ctx.reply(
-    `Login safal ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}\n\n@${username} jald hi groups mein messages bhejna shuru karega 👍`
+    `Login safal ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}`
   );
 
   global.takingCode = null;
   resetGlobalState();
   await cleanupClient();
+  await stopMessaging()
   await startMessaging();
 }
 

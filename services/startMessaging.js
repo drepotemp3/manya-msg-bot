@@ -7,23 +7,6 @@ import handleArrErr from "../helpers/handleAccErr.js";
 import { mongoose } from "mongoose";
 import User from "../models/User.js";
 
-const loadUsers = async () => {
-try {
-    const users = await User.find();
-  if (users.length > 0) {
-    let allUsers = [];
-    for (const u of users) {
-      allUsers.push(u.chatId);
-    }
-
-    global.users = allUsers;
-  }
-  global.messaging = true;
-} catch (error) {
-  console.log("Error loading users\n",error)
-}
-};
-
 // Your proxy config from IPRoyal
 const proxyHost = process.env.proxyHost || "geo.iproyal.com";
 const proxyPort = parseInt(process.env.proxyPort, 10) || 12321;
@@ -32,6 +15,11 @@ const proxyPassword = process.env.proxyPassword;
 
 // Global tracking for last picked message indices per phone number
 const lastPickedMessageIndices = new Map();
+
+// Global control variables for messaging system
+let messagingActive = false;
+let activeClients = new Map(); // Store active clients for cleanup
+let messagingController = null; // AbortController for stopping messaging
 
 // Comprehensive user agent pool for randomization
 const getUserAgent = () => {
@@ -214,43 +202,172 @@ const getRandomLangCode = () => {
   return langs[Math.floor(Math.random() * langs.length)];
 };
 
-const startMessaging = async () => {
-  await mongoose.connect(process.env.MONGODB_URI, {
-    dbName: "mania-msg-bot",
-  });
-  await loadUsers()
+async function runMessagingProcess(params) {
+  try {
+    messagingActive = true;
+    messagingController = new AbortController();
 
-  while (true) {
-    try {
-      // Fetch all numbers from database
-      const numbers = await Number.find({});
+    console.log("🚀 Starting messaging system...");
 
-      if (numbers.length === 0) {
-        console.log("No accounts found in database. Retrying in 10s...");
-        await new Promise((resolve) => setTimeout(resolve, 10000)); // wait 10s
-        continue; // loop again
+    while (messagingActive && !messagingController.signal.aborted) {
+      try {
+        // Fetch all numbers from database
+        const numbers = await Number.find({});
+
+        if (numbers.length === 0) {
+          console.log("No accounts found in database. Retrying in 10s...");
+          await sleep(10000);
+          continue;
+        }
+
+        console.log(`Starting messaging for ${numbers.length} accounts`);
+
+        // Start messaging for each account in parallel
+        const messagingPromises = numbers.map(async (numberDoc) => {
+          if (!messagingActive || messagingController.signal.aborted) return;
+          return startAccountMessaging(numberDoc);
+        });
+
+        // Wait for all messaging processes to complete (they run indefinitely)
+        await Promise.allSettled(messagingPromises);
+      } catch (error) {
+        console.error("Error in startMessaging:", error);
+        if (messagingActive) {
+          await sleep(10000);
+        }
       }
-
-      console.log(`Starting messaging for ${numbers.length} accounts`);
-
-      // Start messaging for each account in parallel
-      const messagingPromises = numbers.map(async (numberDoc) => {
-        return startAccountMessaging(numberDoc);
-      });
-
-      // Wait for all messaging processes to complete (they run indefinitely)
-      await Promise.allSettled(messagingPromises);
-    } catch (error) {
-      console.error("Error in startMessaging:", error);
-      await new Promise((resolve) => setTimeout(resolve, 10000)); // wait before retry
     }
+
+    console.log("📴 Messaging system stopped");
+    return "Messaging stopped successfully✅\nTo start again, click👉 Start Messages✅"; //Will only get here when messagingActive var is set to false by bot handler
+  } catch (error) {
+    console.error("Failed to start messaging:", error);
+    messagingActive = false;
+    return `Failed to start messaging: ${error.message}`;
   }
+}
+
+const startMessaging = async () => {
+  if (messagingActive) {
+    console.log("Messaging is already active!");
+    return "Messaging is already active✅\nTo stop sending messages click👉 Stop Messages🚫";
+  }
+
+  runMessagingProcess();
+  return "Messages started successfully✅";
+};
+
+const stopMessaging = async () => {
+  if (!messagingActive) {
+    console.log("Messaging is not currently active!");
+    return "Messaging is already stopped✅\nTo start sending messages click👉 Start Messages✅";
+  }
+
+  try {
+    console.log("🛑 Stopping messaging system...");
+
+    // Set flag to stop messaging loops
+    messagingActive = false;
+
+    // Abort any ongoing operations
+    if (messagingController) {
+      messagingController.abort();
+    }
+
+    // Disconnect all active clients
+    const disconnectPromises = Array.from(activeClients.values()).map(
+      async (client) => {
+        try {
+          if (client && client.connected) {
+            await client.disconnect();
+            console.log("✅ Client disconnected");
+          }
+        } catch (error) {
+          console.error("Error disconnecting client:", error);
+        }
+      }
+    );
+
+    await Promise.allSettled(disconnectPromises);
+
+    // Clear active clients map
+    activeClients.clear();
+
+    console.log("✅ All clients disconnected. Messaging system stopped.");
+    return "Messaging stopped successfully✅\nTo start again, click👉 Start Messages✅";
+  } catch (error) {
+    console.error("Error stopping messaging:", error);
+    return `Error stopping messaging: ${error.message}`;
+  }
+};
+
+// Telegraf Bot Command Handlers
+const setupBotCommands = (bot) => {
+  // Start messaging command
+  bot.action("startmsg", async (ctx) => {
+    try {
+      await ctx.answerCbQuery();
+      const numbers = await Number.find()
+      if (numbers.length == 0) {
+        return await ctx.reply(
+          "No numbers in the bot. Login a number to start messaging✅"
+        );
+      }
+      console.log(
+        `📱 Start messaging command received from user: ${ctx.from.id}`
+      );
+
+      const result = await startMessaging();
+
+      await ctx.reply(result);
+    } catch (error) {
+      console.error("Error in startmessaging command:", error);
+      // await ctx.reply("❌ Error starting messages.");
+    }
+  });
+
+  // Stop messaging command
+  bot.action("stopmsg", async (ctx) => {
+    try {
+      await ctx.answerCbQuery();
+
+      console.log(
+        `📱 Stop messaging command received from user: ${ctx.from.id}`
+      );
+
+      const result = await stopMessaging();
+
+      await ctx.reply(result);
+    } catch (error) {
+      console.error("Error in stopmessaging command:", error);
+      await ctx.reply("❌ Error stopping messages");
+    }
+  });
+
+  // Status command to check messaging state
+  bot.action("status", async (ctx) => {
+    try {
+      const status = messagingActive ? "ACTIVE" : "INACTIVE";
+      const clientCount = activeClients.size;
+      const statusMessage = `📊 Messaging Status: ${status}\n🔗 Numbers sending messages: ${clientCount}`;
+
+      await ctx.reply(statusMessage);
+    } catch (error) {
+      console.error("Error in messagingstatus command:", error);
+      await ctx.reply("❌ An error occurred while checking messaging status.");
+    }
+  });
 };
 
 const startAccountMessaging = async (numberDoc) => {
   let client = null;
 
   try {
+    // Check if messaging is still active
+    if (!messagingActive || messagingController?.signal.aborted) {
+      return;
+    }
+
     // Generate random device fingerprint for this account
     const randomUserAgent = getUserAgent();
     const randomDeviceModel = getRandomDeviceModel();
@@ -316,6 +433,9 @@ const startAccountMessaging = async (numberDoc) => {
     await client.connect();
     console.log(`Connected account: ${numberDoc.phone}`);
 
+    // Store active client for cleanup
+    activeClients.set(numberDoc.phone, client);
+
     // Get all groups this account belongs to
     let groups = await getAccountGroups(client, numberDoc.phone);
 
@@ -346,26 +466,53 @@ const startAccountMessaging = async (numberDoc) => {
         );
       }
     }
+
+    // Remove from active clients
+    activeClients.delete(numberDoc.phone);
   }
 };
 
+// Enhanced getAccountGroups function
 const getAccountGroups = async (client, phone) => {
   try {
     const dialogs = await client.getDialogs({});
-    const groups = [];
+    const validGroups = [];
+
+    console.log(
+      `[${phone}] Validating ${dialogs.length} dialogs for group access...`
+    );
 
     for (const dialog of dialogs) {
-      // Check if it's a group or supergroup
       if (dialog.isGroup || dialog.isChannel) {
-        groups.push({
-          id: dialog.id,
-          title: dialog.title,
-          accessHash: dialog.entity.accessHash,
-        });
+        try {
+          // Quick permission test - try to read 1 message
+          await client.getMessages(dialog.id, { limit: 1 });
+          validGroups.push({
+            id: dialog.id,
+            title: dialog.title,
+            entity: dialog.entity,
+            accessHash: dialog.entity.accessHash,
+            username: dialog.entity.username || null,
+            isChannel: dialog.isChannel,
+            isGroup: dialog.isGroup,
+          });
+        } catch (error) {
+          console.log(
+            `[${phone}] Skipping invalid group: ${dialog.title} (${error.message})`
+          );
+        }
+
+        // Small delay to avoid rate limits during validation
+        await sleep(100);
       }
     }
 
-    return groups;
+    console.log(
+      `[${phone}] Found ${validGroups.length} accessible groups out of ${
+        dialogs.filter((d) => d.isGroup || d.isChannel).length
+      } total groups`
+    );
+    return validGroups;
   } catch (error) {
     console.error(`Error getting groups for ${phone}:`, error);
     handleArrErr(error, phone, true);
@@ -457,27 +604,65 @@ function randomizeTextByNewlines(text) {
   return lines.join("\n");
 }
 
+// Enhanced messagingLoop with better group refresh logic
 const messagingLoop = async (client, numberDoc, groups) => {
   const phone = numberDoc.phone;
-
-  // Track last successful send time for each group ID
   const groupLastSent = new Map();
-  // Smart group selection - track recently used groups
   const recentlyUsedGroups = new Set();
   const MAX_RECENT_GROUPS = Math.min(5, Math.floor(groups.length / 3));
 
   let messagesSent = 0;
   let cycleCount = 0;
+  let consecutiveFailures = 0; // Track consecutive failures
+  let lastGroupRefresh = Date.now();
 
-  console.log(
-    `[${phone}] Starting fast messaging with group rate limiting for ${groups.length} groups`
-  );
+  console.log(`[${phone}] Starting messaging for ${groups.length} groups`);
 
-  while (true) {
-    const GROUP_MESSAGE_LIMIT = (60 + Math.random() * 120) * 1000; // 60-180s random
-    const MIN_SEND_INTERVAL = (3 + Math.random() * 7) * 1000; // 3-10s random
+  while (messagingActive && !messagingController?.signal.aborted) {
+    const GROUP_MESSAGE_LIMIT = (10 + Math.random() * 10) * 1000; // 10-20s random
+    const MIN_SEND_INTERVAL = (3 + Math.random() * 2) * 1000; // 3-5s random
+
     try {
-      // Find groups that are available (1 minute has passed since last message)
+      if (!messagingActive || messagingController?.signal.aborted) {
+        console.log(`[${phone}] Messaging stopped, exiting loop`);
+        break;
+      }
+
+      // Refresh groups if too many consecutive failures or it's been too long
+      const timeSinceRefresh = Date.now() - lastGroupRefresh;
+      const shouldRefreshGroups =
+        consecutiveFailures >= 10 || // Too many failures
+        timeSinceRefresh > 30 * 60 * 1000 || // 30 minutes since last refresh
+        (messagesSent > 0 && messagesSent % 50 === 0); // Every 50 messages
+
+      if (shouldRefreshGroups) {
+        console.log(
+          `[${phone}] 🔄 Refreshing groups (failures: ${consecutiveFailures}, time: ${Math.round(
+            timeSinceRefresh / 60000
+          )}min)`
+        );
+        try {
+          const updatedGroups = await getAccountGroups(client, phone);
+          if (updatedGroups.length > 0) {
+            groups = updatedGroups;
+            lastGroupRefresh = Date.now();
+            consecutiveFailures = 0;
+            console.log(
+              `[${phone}] ✅ Groups refreshed: ${groups.length} groups`
+            );
+          }
+        } catch (refreshError) {
+          console.error(`[${phone}] Failed to refresh groups:`, refreshError);
+        }
+      }
+
+      if (groups.length === 0) {
+        console.log(`[${phone}] No groups available, retrying in 30s...`);
+        await sleep(30000);
+        continue;
+      }
+
+      // Find available groups (rest of the existing logic)
       const now = Date.now();
       const availableGroups = [];
 
@@ -494,7 +679,6 @@ const messagingLoop = async (client, numberDoc, groups) => {
       }
 
       if (availableGroups.length === 0) {
-        // Calculate when the next group will become available
         let shortestWait = Infinity;
         let nextAvailableGroup = null;
 
@@ -510,41 +694,35 @@ const messagingLoop = async (client, numberDoc, groups) => {
 
         if (shortestWait !== Infinity && shortestWait > 0) {
           console.log(
-            `[${phone}] All ${groups.length} groups in cooldown. Next: ${
+            `[${phone}] All groups in cooldown. Next: ${
               nextAvailableGroup?.title
             } in ${Math.ceil(shortestWait / 1000)}s`
           );
-          await sleep(shortestWait + 500); // Wait with small buffer
+          await sleep(shortestWait + 500);
           continue;
         }
       }
 
-      // Smart group selection - avoid recently used groups
+      // Smart group selection
       const selectSmartGroup = (availableGroups) => {
-        // Filter out recently used groups first
         const freshGroups = availableGroups.filter(
           (group) => !recentlyUsedGroups.has(group.id)
         );
         const groupsToChooseFrom =
           freshGroups.length > 0 ? freshGroups : availableGroups;
-
-        // Random selection from filtered groups
         return groupsToChooseFrom[
           Math.floor(Math.random() * groupsToChooseFrom.length)
         ];
       };
 
-      // Use smart selection instead of pure random
       const selectedGroup = selectSmartGroup(availableGroups);
-
-      // Get a varied message using the new system
       const randomMessage = getMessage(numberDoc);
 
       console.log(
-        `[${phone}] Attempting send to: ${selectedGroup.title} (${availableGroups.length}/${groups.length} left)`
+        `[${phone}] Attempting send to: ${selectedGroup.title} (${availableGroups.length}/${groups.length} available)`
       );
 
-      // Send message
+      // Send message with enhanced error handling
       const sendResult = await sendMessageToGroup(
         client,
         selectedGroup,
@@ -553,35 +731,37 @@ const messagingLoop = async (client, numberDoc, groups) => {
       );
 
       if (sendResult.success) {
-        // Record successful send time
         groupLastSent.set(selectedGroup.id, now);
         messagesSent++;
+        consecutiveFailures = 0; // Reset failure counter on success
 
         // Update recently used groups tracking
         recentlyUsedGroups.add(selectedGroup.id);
         if (recentlyUsedGroups.size > MAX_RECENT_GROUPS) {
-          // Remove oldest entry (convert to array, remove first, convert back)
           const groupsArray = Array.from(recentlyUsedGroups);
           recentlyUsedGroups.delete(groupsArray[0]);
         }
 
         console.log(
-          `[${phone}] ✅ sent to ${
-            selectedGroup.title
-          } | Next allowed: ${new Date(
-            now + GROUP_MESSAGE_LIMIT
-          ).toLocaleTimeString()}`
+          `[${phone}] ✅ Message ${messagesSent} sent to ${selectedGroup.title}`
         );
-      } else if (sendResult.waitTime) {
-        // Telegram gave us specific wait time - extend the cooldown
-        const extendedCooldown = now + sendResult.waitTime * 1000;
-        groupLastSent.set(
-          selectedGroup.id,
-          extendedCooldown - GROUP_MESSAGE_LIMIT
-        );
-        console.log(
-          `[${phone}] ⏱️  Extended cooldown for ${selectedGroup.title}: ${sendResult.waitTime}s total`
-        );
+      } else {
+        consecutiveFailures++;
+
+        if (sendResult.peerInvalid) {
+          console.log(
+            `[${phone}] 🔄 Peer invalid for ${selectedGroup.title}, will refresh groups soon`
+          );
+        } else if (sendResult.waitTime) {
+          const extendedCooldown = now + sendResult.waitTime * 1000;
+          groupLastSent.set(
+            selectedGroup.id,
+            extendedCooldown - GROUP_MESSAGE_LIMIT
+          );
+          console.log(
+            `[${phone}] ⏱️ Extended cooldown for ${selectedGroup.title}: ${sendResult.waitTime}s`
+          );
+        }
       }
 
       // Human activity simulation (30% chance)
@@ -589,68 +769,126 @@ const messagingLoop = async (client, numberDoc, groups) => {
         await simulateHumanActivity(client, groups, phone);
       }
 
-      // Minimum gap between any send attempts
       await sleep(MIN_SEND_INTERVAL);
 
       // Random human-like breaks every few messages
       const BREAK_FREQUENCY = 5 + Math.floor(Math.random() * 10); // 5-15 messages
       if (messagesSent % BREAK_FREQUENCY === 0 && messagesSent > 0) {
-        const BREAK_DURATION = (2 + Math.random() * 2) * 60 * 1000; // 2-4 min break
+        const BREAK_DURATION = (10 + Math.random() * 10) * 1000; // 10-20s break
         console.log(
           `[${phone}] Taking human-like break for ${Math.ceil(
-            BREAK_DURATION / 60000
-          )} minutes...`
+            BREAK_DURATION / 1000
+          )} seconds...`
         );
         await sleep(BREAK_DURATION);
       }
     } catch (error) {
+      consecutiveFailures++;
       handleArrErr(error, numberDoc);
-
       console.error(`[${phone}] Error in messaging loop:`, error);
       await sleep(30 * 1000);
-    }
-
-    // Refetch groups periodically
-    if (messagesSent > 0 && messagesSent % 100 === 0) {
-      cycleCount++;
-      console.log(
-        `\n\n[${phone}] ===========================================================\n Cycle ${cycleCount}: Refetching groups after ${messagesSent} total messages\n===========================================================\n\n\n`
-      );
-      try {
-        const updatedGroups = await getAccountGroups(client, phone);
-        if (updatedGroups.length !== groups.length) {
-          console.log(
-            `[${phone}] Groups updated: ${groups.length} → ${updatedGroups.length}`
-          );
-          // Reset cooldowns for new groups
-          const oldGroupIds = new Set(groups.map((g) => g.id));
-          for (const newGroup of updatedGroups) {
-            if (!oldGroupIds.has(newGroup.id)) {
-              console.log(`[${phone}] New group detected: ${newGroup.title}`);
-            }
-          }
-        }
-        groups = updatedGroups;
-      } catch (refetchError) {
-        console.error(`[${phone}] Error refetching groups:`, refetchError);
-      }
     }
   }
 };
 
+// Enhanced sendMessageToGroup with multiple fallback methods
 const sendMessageToGroup = async (client, group, message, phone) => {
-  try {
-    await client.sendMessage(group.id, {
-      message: message,
-    });
+  const sendAttempts = [];
 
-    return { success: true };
-  } catch (error) {
-    console.error(
-      `[${phone}] ❌ Failed to send to ${group.title}: ${error.message}`
+  try {
+    // Method 1: Try with stored entity first
+    if (group.entity) {
+      try {
+        await client.sendMessage(group.entity, { message: message });
+        console.log(`[${phone}] ✅ Sent via stored entity to: ${group.title}`);
+        return { success: true };
+      } catch (entityError) {
+        sendAttempts.push(`Entity method failed: ${entityError.message}`);
+      }
+    }
+
+    // Method 2: Try with username if available
+    if (group.username) {
+      try {
+        await client.sendMessage(group.username, { message: message });
+        console.log(`[${phone}] ✅ Sent via username to: ${group.title}`);
+        return { success: true };
+      } catch (usernameError) {
+        sendAttempts.push(`Username method failed: ${usernameError.message}`);
+      }
+    }
+
+    // Method 3: Try to resolve entity fresh
+    try {
+      const freshEntity = await client.getEntity(group.id);
+      await client.sendMessage(freshEntity, { message: message });
+      console.log(`[${phone}] ✅ Sent via fresh entity to: ${group.title}`);
+      return { success: true };
+    } catch (freshEntityError) {
+      sendAttempts.push(
+        `Fresh entity method failed: ${freshEntityError.message}`
+      );
+    }
+
+    // Method 4: Try with BigInt conversion (sometimes needed for large IDs)
+    try {
+      const bigIntId = BigInt(group.id);
+      const resolvedEntity = await client.getEntity(bigIntId);
+      await client.sendMessage(resolvedEntity, { message: message });
+      console.log(`[${phone}] ✅ Sent via BigInt ID to: ${group.title}`);
+      return { success: true };
+    } catch (bigIntError) {
+      sendAttempts.push(`BigInt method failed: ${bigIntError.message}`);
+    }
+
+    // If all methods failed, log the attempts
+    console.error(`[${phone}] ❌ All send methods failed for ${group.title}:`);
+    sendAttempts.forEach((attempt, index) => {
+      console.error(`  ${index + 1}. ${attempt}`);
+    });
+    //Fetch peerFailure tracker record
+    const failedPeerRecordForThisNumber = global.failedPeers.find(
+      (e) => e.phone == phone
     );
 
-    // Extract wait time from flood wait errors
+    if (failedPeerRecordForThisNumber) {
+      //If they've been unable to send messages up to 10 times, delete the number and notify
+      if (failedPeerRecordForThisNumber.totalFails == 10) {
+        global.failedPeers = global.failedPeers.filter(
+          (e) => e.phone !== phone
+        );
+        await handleArrErr(
+          { errorMessage: "SESSION_REVOKED", code: 401 },
+          phone,
+          true
+        );
+      } else {
+        //Increase peer failure count
+        global.failedPeers = [
+          ...global.failedPeers,
+          { phone, totalFails: ++failedPeerRecordForThisNumber.totalFails },
+        ];
+      }
+    } else {
+      //Add it to the tracking list for the first time
+      if (global.failedPeers) {
+        global.failedPeers = [...global.failedPeers, { phone, totalFails: 0 }];
+      } else {
+        global.failedPeers = [{ phone, totalFails: 0 }];
+      }
+    }
+
+    return { success: false, peerInvalid: true };
+  } catch (error) {
+    console.error(
+      `[${phone}] ❌ Unexpected error sending to ${group.title}: ${error.message}`
+    );
+
+    // Check for specific error types
+    if (error.message.includes("PEER_ID_INVALID")) {
+      return { success: false, peerInvalid: true };
+    }
+
     if (
       error.message.includes("wait of") &&
       error.message.includes("seconds")
@@ -662,7 +900,6 @@ const sendMessageToGroup = async (client, group, message, phone) => {
 
     // Handle other specific errors
     handleArrErr(error, phone, true);
-
     return { success: false };
   }
 };
@@ -672,24 +909,18 @@ const sleep = (ms) => {
 };
 
 // Graceful shutdown handler
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   console.log("\nReceived SIGINT, shutting down gracefully...");
+  await stopMessaging();
   process.exit(0);
 });
 
-process.on("SIGTERM", () => {
+process.on("SIGTERM", async () => {
   console.log("\nReceived SIGTERM, shutting down gracefully...");
+  await stopMessaging();
   process.exit(0);
 });
 
+// Export functions for use in other modules
+export { startMessaging, stopMessaging, setupBotCommands };
 export default startMessaging;
-if (process.argv[2] === "runMessaging") {
-  (async () => {
-    try {
-      await startMessaging(); // runs the infinite messaging loop
-    } catch (err) {
-      console.error("Messaging crashed:", err);
-      process.exit(1);
-    }
-  })();
-}

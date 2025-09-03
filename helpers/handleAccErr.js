@@ -1,9 +1,7 @@
 import Number from "../models/Number.js";
 import { Telegraf } from "telegraf";
-import "dotenv/config"
-
-const bot = new Telegraf(process.env.BOT_TOKEN);
-global.bot = bot
+import "dotenv/config";
+import startMessaging, { stopMessaging } from "../services/startMessaging.js";
 
 const deleteAcc = async (justPhone, numberDoc) => {
   //Delete acc
@@ -25,7 +23,6 @@ const handleArrErr = async (err, numberDoc, justPhone = false) => {
   // Detect invalid session by code or message
   const msg = err?.errorMessage?.toUpperCase() || err?.message?.toUpperCase();
   const code = err?.code;
-
   const accountAlert = `
 🚫⛔⚠️
 
@@ -52,26 +49,32 @@ Username: ${numberDoc.username}`
 Kripya check karke confirm karein, aur dobara login karein.  
 Abhi ke liye yeh groups mein messages nahi bhejega jab tak aap dobara login nahi karte.
 `;
-  if (
+ try {
+   if (
     code === 401 &&
     (msg.includes("AUTH_KEY_UNREGISTERED") || msg.includes("SESSION_REVOKED"))
   ) {
-    console.error(`❌ Session revoked or logged out for ${numberDoc.phone}`);
+    console.error(`❌ Session revoked or logged out or account restricted for ${numberDoc.phone}`);
     // DB: delete or mark dead
     // return null;
-    console.log(global.users)
+    await stopMessaging();
+
     for (const u of global.users) {
       global.bot.telegram.sendMessage(u, accountAlert);
     }
     await deleteAcc(justPhone, numberDoc);
+    await startMessaging();
   } else if (code === 400 && msg.includes("AUTH_BYTES_INVALID")) {
     console.error(`❌ Corrupted session string for ${numberDoc.phone}`);
     // DB: delete or mark dead
     // return null;
+    await stopMessaging();
+
     for (const u of global.users) {
       global.bot.telegram.sendMessage(u, accountAlert);
     }
     await deleteAcc(justPhone, numberDoc);
+    await startMessaging();
   } else if (code === 406 && msg.includes("AUTH_KEY_DUPLICATED")) {
     let thisMsg = `
     🚫⛔⚠️
@@ -86,25 +89,31 @@ Username: ${numberDoc.username}`
 
 Please check if the account is working on your telegram, and login again inside this bot.
 `;
+    await stopMessaging();
     for (const u of global.users) {
-        console.log(u)
+      console.log(u);
       global.bot.telegram.sendMessage(u, thisMsg);
     }
     await deleteAcc(justPhone, numberDoc);
+    await startMessaging();
   }
-
   // You can add other checks like API_ID_INVALID if needed:
   else if (msg.includes("API_ID_INVALID")) {
     console.error(`❌ Invalid API_ID/HASH for ${numberDoc.phone}`);
     // return null;
+    await stopMessaging();
     for (const u of global.users) {
       global.bot.telegram.sendMessage(u, accountAlert);
     }
     await deleteAcc(justPhone, numberDoc);
+    await startMessaging();
   } else {
     // For other errors, log and don't delete the session
     console.error(`⚠️ Unexpected error for ${numberDoc.phone}:`, err);
   }
+ } catch (error) {
+  console.log("Error notifying admin of account restriction\n",error)
+ }
 };
 
 export default handleArrErr;
