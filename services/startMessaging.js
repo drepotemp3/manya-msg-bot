@@ -4,8 +4,6 @@ import Number from "../models/Number.js";
 import adMessages from "../utils/adMessages.js";
 import "dotenv/config";
 import handleArrErr from "../helpers/handleAccErr.js";
-import { mongoose } from "mongoose";
-import User from "../models/User.js";
 
 // Your proxy config from IPRoyal
 const proxyHost = process.env.proxyHost || "geo.iproyal.com";
@@ -395,13 +393,13 @@ const startAccountMessaging = async (numberDoc) => {
         useIPv6: Math.random() < 0.3, // 30% chance to use IPv6
         userAgent: randomUserAgent,
         // 🔑 Proxy settings
-        proxy: {
-          ip: proxyHost,
-          port: proxyPort,
-          socksType: 5,
-          username: proxyUsername,
-          password: proxyPassword,
-        },
+        // proxy: {
+        //   ip: proxyHost,
+        //   port: proxyPort,
+        //   socksType: 5,
+        //   username: proxyUsername,
+        //   password: proxyPassword,
+        // },
       }
     );
 
@@ -420,13 +418,13 @@ const startAccountMessaging = async (numberDoc) => {
         useIPv6: Math.random() < 0.3,
         userAgent: randomUserAgent,
         // 🔑 Proxy settings
-        proxy: {
-          ip: proxyHost,
-          port: proxyPort,
-          socksType: 5,
-          username: proxyUsername,
-          password: proxyPassword,
-        },
+        // proxy: {
+        //   ip: proxyHost,
+        //   port: proxyPort,
+        //   socksType: 5,
+        //   username: proxyUsername,
+        //   password: proxyPassword,
+        // },
       }
     );
 

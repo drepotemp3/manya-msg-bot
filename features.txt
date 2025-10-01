@@ -1,0 +1,3 @@
+1. Message random picks, and message line shuffling
+2. Random user Agents
+3. Randomized wait times across several ops

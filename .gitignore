@@ -1,2 +1,4 @@
 node_modules
 .env
+logToFile.js
+realtime_log.txt
