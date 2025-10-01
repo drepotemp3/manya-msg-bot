@@ -929,8 +929,8 @@ const sendMessageToGroup = async (client, group, message, phone) => {
       console.error(`  ${index + 1}. ${attempt}`);
     });
     //Fetch peerFailure tracker record
-    const failedPeerRecordForThisNumber = global.failedPeers.find(
-      (e) => e.phone == phone
+    const failedPeerRecordForThisNumber = global?.failedPeers?.find(
+      (e) => e?.phone == phone
     );
 
     if (failedPeerRecordForThisNumber) {
