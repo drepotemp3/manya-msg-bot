@@ -1,5 +1,4 @@
 import Number from "../models/Number.js";
-import { Telegraf } from "telegraf";
 import "dotenv/config";
 import startMessaging, { stopMessaging } from "../services/startMessaging.js";
 
@@ -23,6 +22,18 @@ const handleArrErr = async (err, numberDoc, justPhone = false) => {
   // Detect invalid session by code or message
   const msg = err?.errorMessage?.toUpperCase() || err?.message?.toUpperCase();
   const code = err?.code;
+  
+  // CRITICAL FIX: IGNORE permission errors - these are group-specific, NOT session errors
+  // These errors mean the bot can't send to specific groups, but the account is still valid
+  if (msg && (msg.includes('CHAT_WRITE_FORBIDDEN') || 
+      msg.includes('CHAT_ADMIN_REQUIRED') ||
+      msg.includes('USER_BANNED_IN_CHANNEL') ||
+      msg.includes('CHAT_SEND_') || // Catches CHAT_SEND_PLAIN_FORBIDDEN, etc.
+      msg.includes('SLOWMODE_WAIT_'))) { // Slowmode is not an account error
+    console.log(`ℹ️ Permission/slowmode error (non-critical, group-specific): ${msg}`);
+    return; // Don't delete account - just a group permission issue
+  }
+
   const accountAlert = `
 🚫⛔⚠️
 
@@ -54,7 +65,7 @@ Abhi ke liye yeh groups mein messages nahi bhejega jab tak aap dobara login nahi
     code === 401 &&
     (msg.includes("AUTH_KEY_UNREGISTERED") || msg.includes("SESSION_REVOKED"))
   ) {
-    console.error(`❌ Session revoked or logged out or account restricted for ${numberDoc.phone}`);
+    console.error(`❌ Session revoked or logged out or account restricted for ${justPhone ? numberDoc : numberDoc.phone}`);
     // DB: delete or mark dead
     // return null;
     await stopMessaging();
@@ -65,7 +76,7 @@ Abhi ke liye yeh groups mein messages nahi bhejega jab tak aap dobara login nahi
     await deleteAcc(justPhone, numberDoc);
     await startMessaging();
   } else if (code === 400 && msg.includes("AUTH_BYTES_INVALID")) {
-    console.error(`❌ Corrupted session string for ${numberDoc.phone}`);
+    console.error(`❌ Corrupted session string for ${justPhone ? numberDoc : numberDoc.phone}`);
     // DB: delete or mark dead
     // return null;
     await stopMessaging();
@@ -98,8 +109,8 @@ Please check if the account is working on your telegram, and login again inside 
     await startMessaging();
   }
   // You can add other checks like API_ID_INVALID if needed:
-  else if (msg.includes("API_ID_INVALID")) {
-    console.error(`❌ Invalid API_ID/HASH for ${numberDoc.phone}`);
+  else if (msg && msg.includes("API_ID_INVALID")) {
+    console.error(`❌ Invalid API_ID/HASH for ${justPhone ? numberDoc : numberDoc.phone}`);
     // return null;
     await stopMessaging();
     for (const u of global.users) {
@@ -107,9 +118,21 @@ Please check if the account is working on your telegram, and login again inside 
     }
     await deleteAcc(justPhone, numberDoc);
     await startMessaging();
+  } else if (msg && msg.includes("USER_DEACTIVATED")) {
+    console.error(`❌ Account deactivated for ${justPhone ? numberDoc : numberDoc.phone}`);
+    await stopMessaging();
+    for (const u of global.users) {
+      global.bot.telegram.sendMessage(u, accountAlert);
+    }
+    await deleteAcc(justPhone, numberDoc);
+    await startMessaging();
+  } else if (code === 420) {
+    // Flood wait - this is temporary, don't delete account
+    console.warn(`⚠️ Flood wait error for ${justPhone ? numberDoc : numberDoc.phone}: ${msg}`);
+    // Don't delete account - this is temporary
   } else {
     // For other errors, log and don't delete the session
-    console.error(`⚠️ Unexpected error for ${numberDoc.phone}:`, err);
+    console.error(`⚠️ Unexpected error for ${justPhone ? numberDoc : numberDoc.phone}:`, err);
   }
  } catch (error) {
   console.log("Error notifying admin of account restriction\n",error)

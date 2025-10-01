@@ -359,8 +359,6 @@ bot.on("text", async (ctx) => {
 
 bot.telegram.setMyCommands([
   { command: "/start", description: "Start Manya bot" },
-  { command: "/start_message", description: "Begin to send messages" },
-  { command: "/stop_messages", description: "Stop to send messages" },
 ]);
 
 // Helper function to send code with retry logic and DC migration handling
@@ -493,7 +491,7 @@ async function handleSuccessfulLogin(result, ctx, password) {
     `Login safal ✅\nNumber: ${global.phoneToLogin}\nUsername: @${username}`
   );
 
-  await ctx.reply("Messages started successfully for ",username,"💯✅.\Check the groups to confirm.")
+  await ctx.reply("Messages started successfully💯✅\nCheck the groups to confirm.")
   global.takingCode = null;
   resetGlobalState();
   await cleanupClient();

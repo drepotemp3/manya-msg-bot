@@ -236,7 +236,7 @@ async function runMessagingProcess(params) {
       }
     }
 
-    console.log("📴 Messaging system stopped");
+    console.log("🔴 Messaging system stopped");
     return "Messaging stopped successfully✅\nTo start again, click👉 Start Messages✅"; //Will only get here when messagingActive var is set to false by bot handler
   } catch (error) {
     console.error("Failed to start messaging:", error);
@@ -392,7 +392,7 @@ const startAccountMessaging = async (numberDoc) => {
         systemLangCode: randomSystemLangCode,
         useIPv6: Math.random() < 0.3, // 30% chance to use IPv6
         userAgent: randomUserAgent,
-        // 🔑 Proxy settings
+        // 🔒 Proxy settings
         // proxy: {
         //   ip: proxyHost,
         //   port: proxyPort,
@@ -417,7 +417,7 @@ const startAccountMessaging = async (numberDoc) => {
         systemLangCode: randomSystemLangCode,
         useIPv6: Math.random() < 0.3,
         userAgent: randomUserAgent,
-        // 🔑 Proxy settings
+        // 🔒 Proxy settings
         // proxy: {
         //   ip: proxyHost,
         //   port: proxyPort,
@@ -691,6 +691,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
   const phone = numberDoc.phone;
   const groupLastSent = new Map();
   const recentlyUsedGroups = new Set();
+  const skippedGroups = new Set(); // Track groups we can't send to
   const MAX_RECENT_GROUPS = Math.min(5, Math.floor(groups.length / 3));
 
   let messagesSent = 0;
@@ -713,7 +714,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
       // Refresh groups if too many consecutive failures or it's been too long
       const timeSinceRefresh = Date.now() - lastGroupRefresh;
       const shouldRefreshGroups =
-        consecutiveFailures >= 10 || // Too many failures
+        consecutiveFailures >= 20 || // Increased threshold since permission errors don't count
         timeSinceRefresh > 30 * 60 * 1000 || // 30 minutes since last refresh
         (messagesSent > 0 && messagesSent % 50 === 0); // Every 50 messages
 
@@ -729,6 +730,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
             groups = updatedGroups;
             lastGroupRefresh = Date.now();
             consecutiveFailures = 0;
+            skippedGroups.clear(); // Reset skipped groups on refresh
             console.log(
               `[${phone}] ✅ Groups refreshed: ${groups.length} groups`
             );
@@ -744,11 +746,16 @@ const messagingLoop = async (client, numberDoc, groups) => {
         continue;
       }
 
-      // Find available groups (rest of the existing logic)
+      // Find available groups (excluding skipped ones)
       const now = Date.now();
       const availableGroups = [];
 
       for (const group of groups) {
+        // Skip groups we know we can't send to
+        if (skippedGroups.has(group.id)) {
+          continue;
+        }
+
         const lastSent = groupLastSent.get(group.id) || 0;
         const timeSinceLastSent = now - lastSent;
 
@@ -760,11 +767,21 @@ const messagingLoop = async (client, numberDoc, groups) => {
         }
       }
 
+      // Check if all accessible groups are skipped
+      if (skippedGroups.size >= groups.length) {
+        console.log(`[${phone}] ⚠️ All groups are inaccessible. Refreshing in 5 minutes...`);
+        await sleep(5 * 60 * 1000);
+        skippedGroups.clear();
+        continue;
+      }
+
       if (availableGroups.length === 0) {
         let shortestWait = Infinity;
         let nextAvailableGroup = null;
 
         for (const group of groups) {
+          if (skippedGroups.has(group.id)) continue;
+          
           const lastSent = groupLastSent.get(group.id) || 0;
           const waitTime = GROUP_MESSAGE_LIMIT - (now - lastSent);
 
@@ -801,7 +818,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
       const randomMessage = getMessage(numberDoc);
 
       console.log(
-        `[${phone}] Attempting send to: ${selectedGroup.title} (${availableGroups.length}/${groups.length} available)`
+        `[${phone}] Attempting send to: ${selectedGroup.title} (${availableGroups.length}/${groups.length - skippedGroups.size} available)`
       );
 
       // Send message with enhanced error handling
@@ -828,11 +845,16 @@ const messagingLoop = async (client, numberDoc, groups) => {
           `[${phone}] ✅ Message ${messagesSent} sent to ${selectedGroup.title}`
         );
       } else {
-        consecutiveFailures++;
+        // Only count actual failures, not permission issues
+        if (!sendResult.skipFailureTracking) {
+          consecutiveFailures++;
+        }
 
-        if (sendResult.peerInvalid) {
+        if (sendResult.permissionDenied) {
+          // Permanently skip this group
+          skippedGroups.add(selectedGroup.id);
           console.log(
-            `[${phone}] 🔄 Peer invalid for ${selectedGroup.title}, will refresh groups soon`
+            `[${phone}] 🚫 Skipping group permanently: ${selectedGroup.title} (${skippedGroups.size}/${groups.length} skipped)`
           );
         } else if (sendResult.waitTime) {
           const extendedCooldown = now + sendResult.waitTime * 1000;
@@ -842,6 +864,10 @@ const messagingLoop = async (client, numberDoc, groups) => {
           );
           console.log(
             `[${phone}] ⏱️ Extended cooldown for ${selectedGroup.title}: ${sendResult.waitTime}s`
+          );
+        } else if (sendResult.peerInvalid) {
+          console.log(
+            `[${phone}] 🔄 Peer invalid for ${selectedGroup.title}, will refresh groups soon`
           );
         }
       }
@@ -858,7 +884,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
       if (messagesSent % BREAK_FREQUENCY === 0 && messagesSent > 0) {
         const BREAK_DURATION = (10 + Math.random() * 10) * 1000; // 10-20s break
         console.log(
-          `[${phone}] Taking human-like break for ${Math.ceil(
+          `[${phone}] 💤 Taking human-like break for ${Math.ceil(
             BREAK_DURATION / 1000
           )} seconds...`
         );
@@ -873,7 +899,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
   }
 };
 
-// Enhanced sendMessageToGroup with multiple fallback methods
+// Enhanced sendMessageToGroup with multiple fallback methods and proper error categorization
 const sendMessageToGroup = async (client, group, message, phone) => {
   const sendAttempts = [];
 
@@ -928,56 +954,62 @@ const sendMessageToGroup = async (client, group, message, phone) => {
     sendAttempts.forEach((attempt, index) => {
       console.error(`  ${index + 1}. ${attempt}`);
     });
-    //Fetch peerFailure tracker record
-    const failedPeerRecordForThisNumber = global?.failedPeers?.find(
-      (e) => e?.phone == phone
-    );
 
-    if (failedPeerRecordForThisNumber) {
-      //If they've been unable to send messages up to 10 times, delete the number and notify
-      if (failedPeerRecordForThisNumber.totalFails == 10) {
-        global.failedPeers = global.failedPeers.filter(
-          (e) => e.phone !== phone
-        );
-        await handleArrErr(
-          { errorMessage: "SESSION_REVOKED", code: 401 },
-          phone,
-          true
-        );
-      } else {
-        //Increase peer failure count
-        global.failedPeers = [
-          ...global.failedPeers,
-          { phone, totalFails: ++failedPeerRecordForThisNumber.totalFails },
-        ];
-      }
-    } else {
-      //Add it to the tracking list for the first time
-      if (global.failedPeers) {
-        global.failedPeers = [...global.failedPeers, { phone, totalFails: 0 }];
-      } else {
-        global.failedPeers = [{ phone, totalFails: 0 }];
-      }
+    // Analyze the errors to determine the type of failure
+    const errorMessages = sendAttempts.join(' ').toUpperCase();
+    
+    // CRITICAL: Check for wait time requirement FIRST
+    if (errorMessages.includes('WAIT OF') && errorMessages.includes('SECONDS')) {
+      const match = sendAttempts[0].match(/wait of (\d+) seconds/i);
+      const waitTime = match ? parseInt(match[1]) : 60;
+      console.log(`[${phone}] ⏱️ Slowmode: ${group.title} requires ${waitTime}s wait`);
+      return { success: false, waitTime: waitTime, skipFailureTracking: true };
     }
 
-    return { success: false, peerInvalid: true };
+    // Check for permission errors (NOT session errors)
+    if (errorMessages.includes('CHAT_WRITE_FORBIDDEN') || 
+        errorMessages.includes('CHAT_ADMIN_REQUIRED') ||
+        errorMessages.includes('USER_BANNED_IN_CHANNEL')) {
+      console.log(`[${phone}] 🚫 No permission in: ${group.title} (will skip this group)`);
+      return { success: false, permissionDenied: true, skipFailureTracking: true };
+    }
+
+    // Check for actual peer/session errors
+    if (errorMessages.includes('PEER_ID_INVALID') || 
+        errorMessages.includes('CHANNEL_INVALID') ||
+        errorMessages.includes('CHAT_ID_INVALID')) {
+      console.log(`[${phone}] ⚠️ Invalid peer: ${group.title}`);
+      return { success: false, peerInvalid: true };
+    }
+
+    // Default: unknown failure
+    return { success: false };
+
   } catch (error) {
     console.error(
       `[${phone}] ❌ Unexpected error sending to ${group.title}: ${error.message}`
     );
 
     // Check for specific error types
-    if (error.message.includes("PEER_ID_INVALID")) {
-      return { success: false, peerInvalid: true };
-    }
-
-    if (
-      error.message.includes("wait of") &&
-      error.message.includes("seconds")
-    ) {
-      const match = error.message.match(/wait of (\d+) seconds/);
+    const msg = error.message?.toUpperCase() || '';
+    
+    // Handle wait time
+    if (msg.includes('WAIT OF') && msg.includes('SECONDS')) {
+      const match = error.message.match(/wait of (\d+) seconds/i);
       const waitTime = match ? parseInt(match[1]) : 60;
-      return { success: false, waitTime: waitTime };
+      return { success: false, waitTime: waitTime, skipFailureTracking: true };
+    }
+    
+    // Handle permission errors
+    if (msg.includes('CHAT_WRITE_FORBIDDEN') || 
+        msg.includes('CHAT_ADMIN_REQUIRED') ||
+        msg.includes('USER_BANNED_IN_CHANNEL')) {
+      return { success: false, permissionDenied: true, skipFailureTracking: true };
+    }
+    
+    // Handle peer errors
+    if (msg.includes('PEER_ID_INVALID')) {
+      return { success: false, peerInvalid: true };
     }
 
     // Handle other specific errors
