@@ -127,10 +127,10 @@ bot.action("accounts", async (ctx) => {
     const allAcc = await Number.find().select("username phone");
     if (allAcc.length == 0) {
       await ctx.reply(
-        "No accounts in bot. Please login to add accounts👉 /login"
+        "No accounts in bot."
       );
       return await ctx.reply(
-        "Bot mein koi accounts nahi hain. Kripya login karke accounts add karein 👉 /login"
+        "Bot mein koi accounts nahi hain."
       );
     }
 

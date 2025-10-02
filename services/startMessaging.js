@@ -305,7 +305,7 @@ const setupBotCommands = (bot) => {
   bot.action("startmsg", async (ctx) => {
     try {
       await ctx.answerCbQuery();
-      const numbers = await Number.find()
+      const numbers = await Number.find();
       if (numbers.length == 0) {
         return await ctx.reply(
           "No numbers in the bot. Login a number to start messaging✅"
@@ -431,6 +431,19 @@ const startAccountMessaging = async (numberDoc) => {
     await client.connect();
     console.log(`Connected account: ${numberDoc.phone}`);
 
+    // Suppress non-critical timeout errors from update loop
+    process.on("unhandledRejection", (reason, promise) => {
+      if (
+        reason?.message === "TIMEOUT" &&
+        reason?.stack?.includes("updates.js")
+      ) {
+        // console.log(`[${numberDoc.phone}] Background update timeout (ignored)`);
+        return; // Suppress
+      }
+      // Log other unhandled rejections
+      console.error("Unhandled Rejection:", reason);
+    });
+
     // Store active client for cleanup
     activeClients.set(numberDoc.phone, client);
 
@@ -550,27 +563,39 @@ const simulateHumanActivity = async (client, groups, phone) => {
         const randomGroup = groups[Math.floor(Math.random() * groups.length)];
         try {
           // Start typing indicator
-          await client.invoke(new Api.messages.SetTyping({
-            peer: randomGroup.entity || randomGroup.id,
-            action: new Api.SendMessageTypingAction({})
-          }));
-          
+          await client.invoke(
+            new Api.messages.SetTyping({
+              peer: randomGroup.entity || randomGroup.id,
+              action: new Api.SendMessageTypingAction({}),
+            })
+          );
+
           // Keep typing for realistic duration (2-8 seconds)
           const typingDuration = 2000 + Math.random() * 6000;
           await sleep(typingDuration);
-          
+
           // Stop typing by sending cancel action
-          await client.invoke(new Api.messages.SetTyping({
-            peer: randomGroup.entity || randomGroup.id,
-            action: new Api.SendMessageCancelAction({})
-          }));
-          
-          console.log(`[${phone}] ⌨️  Simulated typing for ${Math.round(typingDuration/1000)}s in: ${randomGroup.title}`);
+          await client.invoke(
+            new Api.messages.SetTyping({
+              peer: randomGroup.entity || randomGroup.id,
+              action: new Api.SendMessageCancelAction({}),
+            })
+          );
+
+          console.log(
+            `[${phone}] ⌨️  Simulated typing for ${Math.round(
+              typingDuration / 1000
+            )}s in: ${randomGroup.title}`
+          );
         } catch (typingError) {
           // Fallback: just simulate thinking time without API calls
           const thinkingTime = 1000 + Math.random() * 3000;
           await sleep(thinkingTime);
-          console.log(`[${phone}] 💭 Simulated thinking time (${Math.round(thinkingTime/1000)}s) - typing API failed`);
+          console.log(
+            `[${phone}] 💭 Simulated thinking time (${Math.round(
+              thinkingTime / 1000
+            )}s) - typing API failed`
+          );
         }
       },
 
@@ -581,63 +606,81 @@ const simulateHumanActivity = async (client, groups, phone) => {
         const offsetId = Math.floor(Math.random() * 100) + 50; // Random offset
         await client.getMessages(randomGroup.id, {
           limit: Math.floor(Math.random() * 3) + 1,
-          offsetId: offsetId
+          offsetId: offsetId,
         });
-        console.log(`[${phone}] 📜 Simulated scrolling through history in: ${randomGroup.title}`);
+        console.log(
+          `[${phone}] 📜 Simulated scrolling through history in: ${randomGroup.title}`
+        );
       },
 
       // Simulate brief online status update
       async () => {
         try {
-          await client.invoke(new Api.account.UpdateStatus({
-            offline: false
-          }));
+          await client.invoke(
+            new Api.account.UpdateStatus({
+              offline: false,
+            })
+          );
           console.log(`[${phone}] 🟢 Updated online status`);
         } catch (statusError) {
-          console.log(`[${phone}] 🟡 Online status update failed (non-critical)`);
+          console.log(
+            `[${phone}] 🟡 Online status update failed (non-critical)`
+          );
         }
       },
 
       // Simulate checking a random chat (switching between chats)
       async () => {
         if (groups.length > 1) {
-          const randomGroup1 = groups[Math.floor(Math.random() * groups.length)];
-          const randomGroup2 = groups[Math.floor(Math.random() * groups.length)];
-          
+          const randomGroup1 =
+            groups[Math.floor(Math.random() * groups.length)];
+          const randomGroup2 =
+            groups[Math.floor(Math.random() * groups.length)];
+
           // Check first chat
           await client.getMessages(randomGroup1.id, { limit: 1 });
           await sleep(500 + Math.random() * 1500); // Brief pause
-          
+
           // Switch to second chat
           await client.getMessages(randomGroup2.id, { limit: 1 });
-          
-          console.log(`[${phone}] 🔄 Simulated switching between chats: ${randomGroup1.title} → ${randomGroup2.title}`);
+
+          console.log(
+            `[${phone}] 🔄 Simulated switching between chats: ${randomGroup1.title} → ${randomGroup2.title}`
+          );
         }
-      }
+      },
     ];
 
     // Pick random activity with weighted probability (typing is more common)
     let selectedActivity;
     const random = Math.random();
-    
+
     if (random < 0.3) {
       // 30% chance of typing simulation (most human-like)
       selectedActivity = activities[3]; // typing activity
     } else if (random < 0.6) {
       // 30% chance of reading messages
-      selectedActivity = activities[0]; // reading activity  
+      selectedActivity = activities[0]; // reading activity
     } else {
       // 40% chance of other activities
-      const otherActivities = [activities[1], activities[2], activities[4], activities[5], activities[6]];
-      selectedActivity = otherActivities[Math.floor(Math.random() * otherActivities.length)];
+      const otherActivities = [
+        activities[1],
+        activities[2],
+        activities[4],
+        activities[5],
+        activities[6],
+      ];
+      selectedActivity =
+        otherActivities[Math.floor(Math.random() * otherActivities.length)];
     }
-    
+
     await selectedActivity();
-    
   } catch (error) {
     handleArrErr(error, phone, true);
     // Silently ignore simulation errors - they're not critical
-    console.log(`[${phone}] Activity simulation failed (non-critical): ${error.message}`);
+    console.log(
+      `[${phone}] Activity simulation failed (non-critical): ${error.message}`
+    );
   }
 };
 
@@ -769,7 +812,9 @@ const messagingLoop = async (client, numberDoc, groups) => {
 
       // Check if all accessible groups are skipped
       if (skippedGroups.size >= groups.length) {
-        console.log(`[${phone}] ⚠️ All groups are inaccessible. Refreshing in 5 minutes...`);
+        console.log(
+          `[${phone}] ⚠️ All groups are inaccessible. Refreshing in 5 minutes...`
+        );
         await sleep(5 * 60 * 1000);
         skippedGroups.clear();
         continue;
@@ -781,7 +826,7 @@ const messagingLoop = async (client, numberDoc, groups) => {
 
         for (const group of groups) {
           if (skippedGroups.has(group.id)) continue;
-          
+
           const lastSent = groupLastSent.get(group.id) || 0;
           const waitTime = GROUP_MESSAGE_LIMIT - (now - lastSent);
 
@@ -818,7 +863,9 @@ const messagingLoop = async (client, numberDoc, groups) => {
       const randomMessage = getMessage(numberDoc);
 
       console.log(
-        `[${phone}] Attempting send to: ${selectedGroup.title} (${availableGroups.length}/${groups.length - skippedGroups.size} available)`
+        `[${phone}] Attempting send to: ${selectedGroup.title} (${
+          availableGroups.length
+        }/${groups.length - skippedGroups.size} available)`
       );
 
       // Send message with enhanced error handling
@@ -956,59 +1003,79 @@ const sendMessageToGroup = async (client, group, message, phone) => {
     });
 
     // Analyze the errors to determine the type of failure
-    const errorMessages = sendAttempts.join(' ').toUpperCase();
-    
+    const errorMessages = sendAttempts.join(" ").toUpperCase();
+
     // CRITICAL: Check for wait time requirement FIRST
-    if (errorMessages.includes('WAIT OF') && errorMessages.includes('SECONDS')) {
+    if (
+      errorMessages.includes("WAIT OF") &&
+      errorMessages.includes("SECONDS")
+    ) {
       const match = sendAttempts[0].match(/wait of (\d+) seconds/i);
       const waitTime = match ? parseInt(match[1]) : 60;
-      console.log(`[${phone}] ⏱️ Slowmode: ${group.title} requires ${waitTime}s wait`);
+      console.log(
+        `[${phone}] ⏱️ Slowmode: ${group.title} requires ${waitTime}s wait`
+      );
       return { success: false, waitTime: waitTime, skipFailureTracking: true };
     }
 
     // Check for permission errors (NOT session errors)
-    if (errorMessages.includes('CHAT_WRITE_FORBIDDEN') || 
-        errorMessages.includes('CHAT_ADMIN_REQUIRED') ||
-        errorMessages.includes('USER_BANNED_IN_CHANNEL')) {
-      console.log(`[${phone}] 🚫 No permission in: ${group.title} (will skip this group)`);
-      return { success: false, permissionDenied: true, skipFailureTracking: true };
+    if (
+      errorMessages.includes("CHAT_WRITE_FORBIDDEN") ||
+      errorMessages.includes("CHAT_ADMIN_REQUIRED") ||
+      errorMessages.includes("USER_BANNED_IN_CHANNEL")
+    ) {
+      console.log(
+        `[${phone}] 🚫 No permission in: ${group.title} (will skip this group)`
+      );
+      return {
+        success: false,
+        permissionDenied: true,
+        skipFailureTracking: true,
+      };
     }
 
     // Check for actual peer/session errors
-    if (errorMessages.includes('PEER_ID_INVALID') || 
-        errorMessages.includes('CHANNEL_INVALID') ||
-        errorMessages.includes('CHAT_ID_INVALID')) {
+    if (
+      errorMessages.includes("PEER_ID_INVALID") ||
+      errorMessages.includes("CHANNEL_INVALID") ||
+      errorMessages.includes("CHAT_ID_INVALID")
+    ) {
       console.log(`[${phone}] ⚠️ Invalid peer: ${group.title}`);
       return { success: false, peerInvalid: true };
     }
 
     // Default: unknown failure
     return { success: false };
-
   } catch (error) {
     console.error(
       `[${phone}] ❌ Unexpected error sending to ${group.title}: ${error.message}`
     );
 
     // Check for specific error types
-    const msg = error.message?.toUpperCase() || '';
-    
+    const msg = error.message?.toUpperCase() || "";
+
     // Handle wait time
-    if (msg.includes('WAIT OF') && msg.includes('SECONDS')) {
+    if (msg.includes("WAIT OF") && msg.includes("SECONDS")) {
       const match = error.message.match(/wait of (\d+) seconds/i);
       const waitTime = match ? parseInt(match[1]) : 60;
       return { success: false, waitTime: waitTime, skipFailureTracking: true };
     }
-    
+
     // Handle permission errors
-    if (msg.includes('CHAT_WRITE_FORBIDDEN') || 
-        msg.includes('CHAT_ADMIN_REQUIRED') ||
-        msg.includes('USER_BANNED_IN_CHANNEL')) {
-      return { success: false, permissionDenied: true, skipFailureTracking: true };
+    if (
+      msg.includes("CHAT_WRITE_FORBIDDEN") ||
+      msg.includes("CHAT_ADMIN_REQUIRED") ||
+      msg.includes("USER_BANNED_IN_CHANNEL")
+    ) {
+      return {
+        success: false,
+        permissionDenied: true,
+        skipFailureTracking: true,
+      };
     }
-    
+
     // Handle peer errors
-    if (msg.includes('PEER_ID_INVALID')) {
+    if (msg.includes("PEER_ID_INVALID")) {
       return { success: false, peerInvalid: true };
     }
 
